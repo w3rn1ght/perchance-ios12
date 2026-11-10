@@ -1,0 +1,62 @@
+/* ============================================================================
+ * compat.css — статические CSS-фолбэки для Safari 12
+ * ----------------------------------------------------------------------------
+ * Отдаётся как /__legacy/compat.css и подключается последним.
+ * Правила намеренно "агрессивные" через @supports: там, где браузер умеет
+ * новые свойства, мы ничего не ломаем.
+ * ========================================================================== */
+
+/* ---------- если нет поддержки CSS custom properties (их нет только в IE) --- */
+@supports not (--lp: 1) {
+  /* не наш случай в Safari 12, оставлено для порядка */
+}
+
+/* ---------- flex gap: Safari 12 не поддерживает gap у flex ---------- */
+@supports not (gap: 1px) {
+  /* JS-шим (legacy.js) расставляет margin; здесь только выравнивание */
+  .menu-item { margin: 0 1px; }
+}
+
+/* ---------- backdrop-filter: -webkit- префикс обязателен до Safari 14 ------ */
+#menuBarEl .menu-item {
+  -webkit-backdrop-filter: var(--menu-bar-item-backdrop-filter);
+}
+#menuBarEl .menu-item:hover {
+  -webkit-backdrop-filter: var(--menu-bar-item-backdrop-filter-hover);
+}
+
+/* ---------- modern-цветовые функции и :has / :is, которых нет в Safari 12 -- */
+@supports not (selector(:is(*))) {
+  /* Небольшая страховка: если браузер не понял часть селекторов в бандле сайта,
+     интерфейс всё равно должен быть виден и кликабелен. */
+  #menuBarEl, #appEl, #editorEl { visibility: visible !important; }
+}
+
+/* ---------- body: Safari 12 не понимает `overflow: clip` / `light-dark` ---- */
+body { overflow: hidden; }
+
+/* ---------- iframe-генератор: убираем инерционную прокрутку --------------- */
+#outputIframeEl {
+  -webkit-overflow-scrolling: touch;
+  background: #fff;
+}
+
+/* ---------- спиннеры: 100vh в iOS учитывает адресную строку неправильно ----- */
+#editorLoadSpinnerEl, #outputLoadSpinner {
+  height: 100%;
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+}
+
+/* ---------- динамический viewport (dvh) — шлём фолбэк ---------------------- */
+#appEl { height: 100%; }
+@supports (height: 100dvh) {
+  #appEl { height: 100dvh; }
+}
+
+/* ---------- невидимая полоса прокрутки ---------- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, 0.45); border-radius: 4px; }
+
+/* ---------- бейдж отладки (см. legacy.js) не должен съедать тапы ---------- */
+#legacyPortalBadge { touch-action: manipulation; }

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PCTransform — самопроверка</title>
+<style>
+  body{font:15px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:16px;background:#0f1115;color:#e6e6e6}
+  h1{font-size:18px;margin:0 0 12px}
+  .row{padding:8px 10px;border-radius:8px;margin:6px 0;background:#171a21}
+  .ok{color:#4ade80} .bad{color:#f87171}
+  pre{white-space:pre-wrap;word-break:break-word;font-size:12px;margin:6px 0 0;color:#9ca3af}
+</style>
+</head>
+<body>
+<h1>PCTransform — самопроверка</h1>
+<div id="out"></div>
+
+<script src="babel.min.js"></script>
+<script src="transform-web.js"></script>
+<script>
+var pass = 0, fail = 0;
+
+function row(label, ok, details) {
+  var out = document.getElementById('out');
+  var d = document.createElement('div');
+  d.className = 'row';
+  var b = document.createElement('b');
+  b.className = ok ? 'ok' : 'bad';
+  b.textContent = ok ? 'OK' : 'FAIL';
+  d.appendChild(b);
+  d.appendChild(document.createTextNode(' ' + label));
+  if (details) {
+    var pre = document.createElement('pre');
+    pre.textContent = details;
+    d.appendChild(pre);
+  }
+  out.appendChild(d);
+}
+
+function leftoverSyntax(code) {
+  var bad = [];
+  var checks = [
+    [/\?\.[A-Za-z_$[(]/, '?.'],
+    [/[A-Za-z0-9_$)\]]\s*\?\?[^=.?]/, '??'],
+    [/\|\|=[^=]/, '||='],
+    [/&&=[^=]/, '&&='],
+    [/^[ \t]+#[A-Za-z_$][\w$]*\s*(?:=(?!=)|;)/m, '#private'],
+    [/\bstatic\s*\{/, 'static{']
+  ];
+  for (var i = 0; i < checks.length; i++) {
+    if (checks[i][0].test(code)) { bad.push(checks[i][1]); }
+  }
+  return bad;
+}
+
+function runTests() {
+  document.getElementById('out').innerHTML = '';
+  pass = 0;
+  fail = 0;
+
+  var cases = [
+    ['optional chaining', 'var a = {b: {c: 1}}; var x = a' + '?.' + 'b' + '?.' + 'c;'],
+    ['nullish', 'var x = a ' + '??' + ' 1;'],
+    ['private field', 'class A { ' + '#p' + ' = 1; get v() { return this.' + '#p' + '; } }'],
+    ['static block', 'class B { static { B.x = 1; } }'],
+    ['logical assign', 'var a = null; a ' + '??=' + ' 3; var b; b ' + '||=' + ' 1; var c = 1; c ' + '&&=' + ' 2;'],
+    ['async/await stays', 'async function f() { await g(); }']
+  ];
+
+  for (var i = 0; i < cases.length; i++) {
+    var name = cases[i][0];
+    var src = cases[i][1];
+    var res = PCTransform.transformJS(src, { force: true });
+    if (!res.ok) {
+      row(name, false, 'Babel error: ' + res.error);
+      fail++;
+      continue;
+    }
+    var bad = leftoverSyntax(res.code);
+    if (bad.length) {
+      row(name, false, 'left: ' + bad.join(', ') + '\n' + res.code);
+      fail++;
+    } else {
+      row(name, true, res.code.slice(0, 150));
+      pass++;
+    }
+  }
+
+  var css = 'a{inset:0} b{aspect-ratio:1/1} c{backdrop-filter:blur(2px)} d{color:light-dark(#fff,#000)}';
+  var patched = PCTransform.patchCSS(css);
+  var cssOk = /top:\s*0/.test(patched) && /-webkit-backdrop-filter/.test(patched) &&
+    /--legacy-aspect-ratio/.test(patched) && /#fff/.test(patched);
+  row('CSS (inset / aspect-ratio / prefix / light-dark)', cssOk, patched);
+  if (cssOk) { pass++; } else { fail++; }
+
+  var html = '<html><head><meta charset="utf-8">' +
+    '<meta http-equiv="Content-Security-Policy" content="x"></head>' +
+    '<body><script>var a = o' + '?.' + 'b;<\/script>' +
+    '<script type="notjs">%7B%22x%22%3A1%7D<\/script></body></html>';
+  var outHtml = PCTransform.transformHTML(html);
+  var htmlOk = outHtml.indexOf('/__legacy/polyfills.js') >= 0 &&
+    outHtml.indexOf('content-security-policy') < 0 &&
+    outHtml.indexOf('%7B%22x%22') >= 0 &&
+    leftoverSyntax(outHtml).length === 0;
+  row('HTML (polyfills / CSP / inline scripts)', htmlOk, outHtml.slice(0, 240));
+  if (htmlOk) { pass++; } else { fail++; }
+
+  var summary = document.createElement('div');
+  summary.className = 'row';
+  summary.innerHTML = '<b>Итого:</b> ' + pass + ' ok, ' + fail + ' fail · v' +
+    PCTransform.VERSION + ' · Babel: ' + (window.Babel ? 'загружен' : 'НЕТ');
+  document.getElementById('out').insertBefore(summary, document.getElementById('out').firstChild);
+
+  window.__pcResult = { pass: pass, fail: fail };
+  return window.__pcResult;
+}
+
+function boot() {
+  if (!window.PCTransform) {
+    row('transform-web.js не загрузился', false, '');
+    return;
+  }
+  var started = false;
+  function start() {
+    if (started) { return; }
+    started = true;
+    runTests();
+  }
+  if (window.Babel && window.Babel.transform) { start(); return; }
+
+  // На iOS 12 файл на 3 МБ грузится заметно. Догружаем сами с повтором:
+  // первый заход часто «съедает» сетевой стек, пока грузится страница.
+  var tries = 0;
+  function loadBabel() {
+    tries++;
+    var s = document.createElement('script');
+    s.src = 'babel.min.js' + (tries > 1 ? '?r=' + tries : '');
+    s.onload = function () {
+      if (window.Babel && window.Babel.transform) { start(); }
+      else if (tries < 3) { setTimeout(loadBabel, 500); }
+      else { row('Babel не загрузился', false, 'lib/babel.min.js повреждён'); }
+    };
+    s.onerror = function () {
+      if (tries < 3) { setTimeout(loadBabel, 800); }
+      else { row('Babel не загрузился (сеть)', false, 'lib/babel.min.js'); }
+    };
+    document.head.appendChild(s);
+  }
+  loadBabel();
+}
+
+window.addEventListener('load', boot);
+</script>
+</body>
+</html>

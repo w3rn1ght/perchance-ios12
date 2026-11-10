@@ -1,0 +1,7 @@
+﻿node-portable/
+certs/
+cache/
+*.log
+*.err
+packages/
+.theos/

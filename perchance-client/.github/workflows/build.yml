@@ -1,0 +1,58 @@
+name: Build Perchance.deb
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ldid and xz
+        run: brew install ldid xz
+
+      - name: Setup Theos
+        run: |
+          export THEOS=$HOME/theos
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+
+      - name: Install iOS 12.4 SDK
+        run: |
+          git clone --depth=1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/theos-sdks
+          cd /tmp/theos-sdks
+          git sparse-checkout set iPhoneOS12.4.sdk
+          mkdir -p "$THEOS/sdks"
+          cp -R iPhoneOS12.4.sdk "$THEOS/sdks/"
+          ls "$THEOS/sdks"
+
+      - name: Build package
+        run: |
+          cd perchance-client
+          make package FINALPACKAGE=1 2>&1 | tee /tmp/build.log
+
+      - name: Upload build log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: /tmp/build.log
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: perchance-deb
+          path: perchance-client/packages/*.deb
+          if-no-files-found: warn
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: perchance-client/packages/*.deb
