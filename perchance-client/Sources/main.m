@@ -1,11 +1,10 @@
 #import <UIKit/UIKit.h>
-#import "LumiAppDelegate.h"
-#import "LumiApplication.h"
+#import "PCAppDelegate.h"
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
         return UIApplicationMain(argc, argv,
-                                 NSStringFromClass([LumiApplication class]),
-                                 NSStringFromClass([LumiAppDelegate class]));
+                                 nil,
+                                 NSStringFromClass([PCAppDelegate class]));
     }
 }
