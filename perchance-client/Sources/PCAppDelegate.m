@@ -18,29 +18,30 @@
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.window.backgroundColor = [UIColor colorWithWhite:0.07 alpha:1];
 
-    // 1. Транспайлер: WKWebView с Babel внутри (см. Resources/web/bridge.html).
-    self.transpiler = [[PCJSTranspiler alloc] init];
+    // 1. Транспайлер: отдельный WKWebView с Babel (Resources/web/bridge.html).
+    PCJSTranspiler *transpiler = [[PCJSTranspiler alloc] init];
+    self.transpiler = transpiler;
 
-    // 2. Прокси: скачивает perchance.org и переписывает файлы.
-    self.proxy = [[PCProxy alloc] initWithTranspiler:self.transpiler];
-    [self.proxy prepare];
+    // 2. «Прокси»: скачивает perchance.org и переписывает файлы.
+    PCProxy *proxy = [[PCProxy alloc] initWithTranspiler:transpiler];
+    [proxy prepare];
+    self.proxy = proxy;
 
     // 3. Обработчик схемы wk:// для WKWebView.
-    self.handler = [[PCTranspilerProtocolHandler alloc] initWithProxy:self.proxy];
+    PCTranspilerProtocolHandler *handler = [[PCTranspilerProtocolHandler alloc] initWithProxy:proxy];
+    self.handler = handler;
 
     // 4. Интерфейс.
-    PCMainViewController *vc = [[PCMainViewController alloc] initWithProxy:self.proxy
-                                                                   handler:self.handler
+    PCMainViewController *vc = [[PCMainViewController alloc] initWithProxy:proxy
+                                                                   handler:handler
                                                                  startPath:@"/welcome"];
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
 
-    // 5. Прогреваем Babel заранее — загрузка ~3 МБ, на iOS 12 это заметно.
-    [self.transpiler startWithCompletion:^(id result, NSError *error) {
-        if (error) {
+    // 5. Прогреваем Babel (~3 МБ) — к первому запросу он уже готов.
+    [transpiler startWithCompletion:^(id result, NSError *error) {
+        if (error != nil) {
             NSLog(@"[perchance-client] Babel: %@", error);
-        } else {
-            NSLog(@"[perchance-client] Babel готов");
         }
     }];
 

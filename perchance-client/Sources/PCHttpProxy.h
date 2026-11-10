@@ -1,27 +1,27 @@
 #import <Foundation/Foundation.h>
-#import "PCProxy.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Системный режим: локальный DNS + HTTPS, чтобы https://perchance.org
-/// открывался через нас во ВСЕХ приложениях, а не только в нашем.
+@class PCProxy;
+
+/// Системный режим: локальный HTTPS-сервер на 127.0.0.1:443.
 ///
-/// Упрощённая схема, полностью соответствующая модели iOS 12:
-///   • HTTPS-сервер на 127.0.0.1:443 (SecureTransport, сертификат cert.pem/key.pem);
-///   • DNS-сервер отвечает 127.0.0.1 на *.perchance.org (см. PCHttpDNSServer);
-///   • приложение (или твик /etc/hosts) направляет запросы домена на localhost.
+/// Нужен, чтобы https://perchance.org открывался через нас не только внутри
+/// приложения, но и в Safari / других приложениях. Требует установленного
+/// CA-сертификата (certs/ca.crt) и парного DNS-сервера (PCDNSServer).
 ///
-/// Сборка системного режима включается флагом компилятора PC_SYSTEM_MODE=1.
+/// Включается флагом компилятора PC_SYSTEM_MODE=1 — см. README.
 @interface PCHttpProxy : NSObject
 
-- (instancetype)initWithProxy:(PCProxy *)proxy;
+- (instancetype)initWithProxy:(PCProxy *)proxy NS_DESIGNATED_INITIALIZER;
+- (instancetype)init NS_UNAVAILABLE;
 
-- (BOOL)startWithError:(NSError **)error;
+- (BOOL)startWithError:(NSError * _Nullable * _Nullable)error;
 - (void)stop;
 
 @property (nonatomic, readonly) BOOL running;
 
-/// Порт, который реально удалось занять (443 в джейлбрейке или 8443).
+/// Реально занятый порт: 443 под root, иначе 8443.
 @property (nonatomic, readonly) uint16_t listeningPort;
 
 @end

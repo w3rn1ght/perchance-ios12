@@ -1,16 +1,3 @@
-//
-// PCProxy.m — «прокси без прокси»: загрузка perchance.org через wk://
-//
-// Раньше эту работу делал Node-сервер: скачать файл, переписать JS/CSS/HTML,
-// отдать браузеру. Здесь то же самое делает нативное приложение.
-//
-// Важно: WKWebView при scheme handler получает только запросы, сделанные
-// из этого документа. Поэтому страницы (.html) грузятся через
-// loadHTMLString с адресом wk://pc/<настоящий URL>, а все относительные
-// ссылки внутри документа остаются внутри этой же схемы и тоже попадают
-// в обработчик.
-//
-
 #import "PCProxy.h"
 #import "PCJSTranspiler.h"
 #import <Foundation/Foundation.h>
@@ -31,8 +18,9 @@ static NSString * const kRootDomain = @"perchance.org";
 
 @implementation PCProxy
 
-- (instancetype)initWithTranspiler:(PCJSTranspiler *)transpiler {
-    if ((self = [super init])) {
+- (nullable instancetype)initWithTranspiler:(PCJSTranspiler *)transpiler {
+    self = [super init];
+    if (self != nil) {
         _transpiler = transpiler;
         NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
         cfg.timeoutIntervalForRequest = 30;
@@ -42,8 +30,8 @@ static NSString * const kRootDomain = @"perchance.org";
         cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
         cfg.HTTPAdditionalHeaders = @{
             @"User-Agent": @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                           "AppleWebKit/537.36 (KHTML, like Gecko) "
-                           "Chrome/131.0.0.0 Safari/537.36",
+                           @"AppleWebKit/537.36 (KHTML, like Gecko) "
+                           @"Chrome/131.0.0.0 Safari/537.36",
             @"Accept-Language": @"ru,en;q=0.9"
         };
         _session = [NSURLSession sessionWithConfiguration:cfg];
@@ -73,7 +61,9 @@ static NSString * const kRootDomain = @"perchance.org";
     unsigned char digest[CC_SHA1_DIGEST_LENGTH];
     CC_SHA1(data.bytes, (CC_LONG)data.length, digest);
     NSMutableString *hex = [NSMutableString stringWithCapacity:40];
-    for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) { [hex appendFormat:@"%02x", digest[i]]; }
+    for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) {
+        [hex appendFormat:@"%02x", digest[i]];
+    }
     return [NSString stringWithFormat:@"%@-%@.dat", kind, hex];
 }
 
@@ -85,12 +75,13 @@ static NSString * const kRootDomain = @"perchance.org";
 #pragma mark - Адреса
 
 /// wk://pc/a257….perchance.org/welcome?x=1 → https://a257….perchance.org/welcome?x=1
-- (NSString *)originURLStringForRequest:(NSURLRequest *)request {
+- (nullable NSString *)originURLStringForRequest:(NSURLRequest *)request {
     NSString *raw = request.URL.absoluteString;
     NSString *prefix = [NSString stringWithFormat:@"%@://%@/", PCScheme, PCSchemeHost];
     if (![raw hasPrefix:prefix]) { return nil; }
     NSString *encoded = [raw substringFromIndex:prefix.length];
-    NSString *decoded = [encoded stringByRemovingPercentEncoding] ?: encoded;
+    NSString *decoded = [encoded stringByRemovingPercentEncoding];
+    if (decoded.length == 0) { decoded = encoded; }
 
     NSRange slash = [decoded rangeOfString:@"/"];
     NSString *host = slash.location == NSNotFound ? decoded : [decoded substringToIndex:slash.location];
@@ -101,51 +92,83 @@ static NSString * const kRootDomain = @"perchance.org";
 
 - (BOOL)isPerchanceHost:(NSString *)host {
     NSString *h = [host lowercaseString];
-    return [h isEqualToString:kRootDomain] || [h hasSuffix:[@"." stringByAppendingString:kRootDomain]];
+    if ([h isEqualToString:kRootDomain]) { return YES; }
+    return [h hasSuffix:[@"." stringByAppendingString:kRootDomain]];
 }
 
-/** Публичный адрес нужен контроллеру, чтобы строить итоговую ссылку. */
+/// Публичный адрес страницы — нужен, чтобы относительные ссылки шли через нас.
 - (NSURL *)webURLForOrigin:(NSString *)origin {
     return [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@/%@", PCScheme, PCSchemeHost, origin]];
 }
 
+/// Полифилы, Babel и compat.css лежат в Resources/web — отдаём их из бандла.
+- (BOOL)bundledResourceForPath:(NSString *)path mime:(NSString **)outMime body:(NSData **)outBody {
+    static NSDictionary<NSString *, NSArray<NSString *> *> *map = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        map = @{
+            @"/__legacy/polyfills.js":    @[ @"polyfills.js", @"application/javascript" ],
+            @"/__legacy/legacy.js":       @[ @"legacy.js", @"application/javascript" ],
+            @"/__legacy/pc-bootstrap.js": @[ @"pc-bootstrap.js", @"application/javascript" ],
+            @"/__legacy/babel.min.js":    @[ @"babel.min.js", @"application/javascript" ],
+            @"/__legacy/core-js-bundle.js": @[ @"core-js-bundle.js", @"application/javascript" ],
+            @"/__legacy/compat.css":      @[ @"compat.css", @"text/css" ]
+        };
+    });
+    NSArray<NSString *> *entry = map[path];
+    if (entry == nil) { return NO; }
+
+    NSString *file = [[NSBundle mainBundle] pathForResource:entry[0] ofType:nil inDirectory:@"web"];
+    if (file == nil) {
+        file = [[NSBundle mainBundle] pathForResource:entry[0] ofType:nil];
+    }
+    NSData *data = [NSData dataWithContentsOfFile:file];
+    if (data == nil) { return NO; }
+
+    if (outMime != NULL) {
+        *outMime = [entry[1] stringByAppendingString:@"; charset=utf-8"];
+    }
+    if (outBody != NULL) {
+        *outBody = data;
+    }
+    return YES;
+}
+
 #pragma mark - Загрузка
 
-- (void)loadRequest:(NSURLRequest *)request
-         completion:(PCProxyCompletion)completion {
+- (void)loadRequest:(NSURLRequest *)request completion:(PCProxyCompletion)completion {
     NSString *origin = [self originURLStringForRequest:request];
-    if (!origin) {
+    if (origin == nil) {
         [self finish:completion mime:nil headers:nil body:nil error:[self error:@"Неизвестный URL"]];
         return;
     }
 
-    // Полифилы и прочие служебные файлы — из бандла, без сети.
-    NSString *originPath = [[NSURL URLWithString:origin] path] ?: @"";
+    NSString *originPath = [[NSURL URLWithString:origin] path];
+    if (originPath.length == 0) { originPath = @"/"; }
+
     NSString *mime = nil;
     NSData *body = nil;
     if ([self bundledResourceForPath:originPath mime:&mime body:&body]) {
-        [self finish:completion mime:mime headers:@{@"Cache-Control": @"no-cache"} body:body error:nil];
+        [self finish:completion mime:mime headers:@{ @"Cache-Control": @"no-cache" } body:body error:nil];
         return;
     }
 
     NSURL *realURL = [NSURL URLWithString:origin];
-    if (!realURL || ![self isPerchanceHost:realURL.host]) {
+    if (realURL == nil || ![self isPerchanceHost:realURL.host]) {
         [self finish:completion mime:nil headers:nil body:nil
                error:[self error:@"Прокси обслуживает только perchance.org"]];
         return;
     }
-    [self loadOriginURL:origin userReferer:nil completion:completion];
+    [self loadOriginURL:origin completion:completion];
 }
 
 - (void)loadPath:(NSString *)originPath completion:(PCProxyCompletion)completion {
-    [self loadOriginURL:originPath userReferer:nil completion:completion];
+    [self loadOriginURL:originPath completion:completion];
 }
 
-- (void)loadOriginURL:(NSString *)origin
-          userReferer:(NSString *)referer
-           completion:(PCProxyCompletion)completion {
+- (void)loadOriginURL:(NSString *)origin completion:(PCProxyCompletion)completion {
     NSURL *realURL = [NSURL URLWithString:origin];
-    if (!realURL) {
+    if (realURL == nil) {
         [self finish:completion mime:nil headers:nil body:nil error:[self error:@"Плохой URL"]];
         return;
     }
@@ -159,17 +182,19 @@ static NSString * const kRootDomain = @"perchance.org";
     NSURLSessionDataTask *task =
         [self.session dataTaskWithRequest:up
                         completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
-        if (err) {
+        if (err != nil) {
             [self finish:completion mime:nil headers:nil body:nil error:err];
             return;
         }
-        NSHTTPURLResponse *http = [resp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)resp : nil;
-        NSString *mime = resp.MIMEType ?: @"application/octet-stream";
-        // Cloudflare: если пришёл challenge — сообщаем честно
-        if ([mime containsString:@"text/html"] && [[http.allHeaderFields description] containsString:@"cf-mitigated"]) {
-            // всё равно отдадим HTML: на iOS без JS он не пройдёт, но человек увидит страницу
+        NSHTTPURLResponse *http = nil;
+        if ([resp isKindOfClass:[NSHTTPURLResponse class]]) {
+            http = (NSHTTPURLResponse *)resp;
         }
-        [self processData:data mime:mime headers:http.allHeaderFields ?: @{} url:origin completion:completion];
+        NSString *mime = resp.MIMEType;
+        if (mime.length == 0) { mime = @"application/octet-stream"; }
+        NSDictionary *headers = http.allHeaderFields;
+        if (headers == nil) { headers = @{}; }
+        [self processData:data mime:mime headers:headers url:origin completion:completion];
     }];
     [task resume];
 }
@@ -181,13 +206,16 @@ static NSString * const kRootDomain = @"perchance.org";
          completion:(PCProxyCompletion)completion {
     NSString *lower = [mime lowercaseString];
     BOOL isHTML = [lower containsString:@"text/html"];
-    BOOL isJS = [lower containsString:@"javascript"] || (!isHTML && [url hasSuffix:@".js"]);
     BOOL isCSS = [lower containsString:@"text/css"];
+    BOOL isJS = NO;
+    if ([lower containsString:@"javascript"]) { isJS = YES; }
+    if (!isHTML && !isJS && [url hasSuffix:@".js"]) { isJS = YES; }
 
     // Service Worker отключён: он кэширует непереписанные файлы.
-    if ([[url lowercaseString] containsString:@"service-worker"] || [url hasSuffix:@"/sw.js"]) {
+    NSString *lowerURL = [url lowercaseString];
+    if ([lowerURL containsString:@"service-worker"] || [url hasSuffix:@"/sw.js"]) {
         NSString *shim = @"self.addEventListener('install',function(e){self.skipWaiting()});"
-                          "self.addEventListener('activate',function(e){e.waitUntil(self.registration.unregister())});";
+                         @"self.addEventListener('activate',function(e){e.waitUntil(self.registration.unregister())});";
         [self finish:completion mime:@"application/javascript" headers:headers
                  body:[shim dataUsingEncoding:NSUTF8StringEncoding] error:nil];
         return;
@@ -199,20 +227,24 @@ static NSString * const kRootDomain = @"perchance.org";
     }
 
     NSString *source = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (!source) {
+    if (source == nil) {
         [self finish:completion mime:mime headers:headers body:data error:nil];
         return;
     }
 
     // --- кэш
-    NSString *kind = isHTML ? @"html" : (isJS ? @"js" : @"css");
-    NSString *key = [self cacheKeyForURL:url kind:kind];
-    NSString *path = [[self cachePath] stringByAppendingPathComponent:key];
+    NSString *kind = @"css";
+    if (isHTML) { kind = @"html"; }
+    else if (isJS) { kind = @"js"; }
+    NSString *path = [[self cachePath] stringByAppendingPathComponent:[self cacheKeyForURL:url kind:kind]];
     NSString *cached = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
-    if (cached.length) {
-        if (isHTML) { [self deliverHTML:cached url:url completion:completion]; }
-        else { [self finish:completion mime:[self mimeForKind:kind] headers:headers
-                       body:[cached dataUsingEncoding:NSUTF8StringEncoding] error:nil]; }
+    if (cached.length > 0) {
+        if (isHTML) {
+            [self deliverHTML:cached url:url completion:completion];
+        } else {
+            [self finish:completion mime:[self mimeForKind:kind] headers:headers
+                     body:[cached dataUsingEncoding:NSUTF8StringEncoding] error:nil];
+        }
         return;
     }
 
@@ -225,7 +257,8 @@ static NSString * const kRootDomain = @"perchance.org";
 
     if (isCSS) {
         [self.transpiler patchCSS:source completion:^(id result, NSError *error) {
-            NSString *out = [result isKindOfClass:[NSString class]] ? result : source;
+            NSString *out = source;
+            if ([result isKindOfClass:[NSString class]]) { out = (NSString *)result; }
             [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
             [self finish:completion mime:@"text/css; charset=utf-8" headers:headers
                      body:[out dataUsingEncoding:NSUTF8StringEncoding] error:nil];
@@ -234,9 +267,16 @@ static NSString * const kRootDomain = @"perchance.org";
     }
 
     [self.transpiler transformJS:source filename:url completion:^(id result, NSError *error) {
-        NSDictionary *dict = [result isKindOfClass:[NSDictionary class]] ? result : nil;
-        NSString *code = [dict[@"code"] isKindOfClass:[NSString class]] ? dict[@"code"] : source;
-        if ([dict[@"ok"] boolValue]) { self.transformed++; } else { self.failed++; }
+        NSDictionary *dict = nil;
+        if ([result isKindOfClass:[NSDictionary class]]) { dict = (NSDictionary *)result; }
+        NSString *code = source;
+        NSString *converted = dict[@"code"];
+        if ([converted isKindOfClass:[NSString class]]) { code = converted; }
+        if ([dict[@"ok"] boolValue]) {
+            self.transformed = self.transformed + 1;
+        } else {
+            self.failed = self.failed + 1;
+        }
         [code writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
         [self finish:completion mime:@"application/javascript; charset=utf-8" headers:headers
                  body:[code dataUsingEncoding:NSUTF8StringEncoding] error:nil];
@@ -249,45 +289,15 @@ static NSString * const kRootDomain = @"perchance.org";
     return @"text/html; charset=utf-8";
 }
 
-/// В каталог Resources/web попадают копии полифилов и Babel.
-/// Страница ищет их по путям нового сайта (/__legacy/…) — отдаём из бандла,
-/// чтобы не зависеть от perchance.org и не ходить в сеть лишний раз.
-- (BOOL)bundledResourceForPath:(NSString *)path
-                          mime:(NSString **)outMime
-                          body:(NSData **)outBody {
-    static NSDictionary<NSString *, NSString *> *map = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        map = @{
-            @"/__legacy/polyfills.js":    @[@"polyfills.js", @"application/javascript"],
-            @"/__legacy/legacy.js":       @[@"legacy.js", @"application/javascript"],
-            @"/__legacy/pc-bootstrap.js": @[@"pc-bootstrap.js", @"application/javascript"],
-            @"/__legacy/babel.min.js":    @[@"babel.min.js", @"application/javascript"],
-            @"/__legacy/compat.css":      @[@"compat.css", @"text/css"]
-        };
-    });
-    NSArray *entry = map[path];
-    if (!entry) { return NO; }
-
-    NSString *file = [[NSBundle mainBundle] pathForResource:entry[0] ofType:nil inDirectory:@"web"];
-    if (!file) { file = [[NSBundle mainBundle] pathForResource:entry[0] ofType:nil]; }
-    NSData *data = [NSData dataWithContentsOfFile:file];
-    if (!data) { return NO; }
-
-    if (outMime) { *outMime = [entry[1] stringByAppendingString:@"; charset=utf-8"]; }
-    if (outBody) { *outBody = data; }
-    return YES;
-}
-
-/// HTML отдаём особым образом: контроллер загрузит его loadHTMLString'ом
-/// с адресом wk://pc/<host>/<path>, чтобы относительные ссылки шли через нас.
-- (void)deliverHTML:(NSString *)html
-                url:(NSString *)url
-         completion:(PCProxyCompletion)completion {
+/// HTML отдаётся особым маркером: обработчик схемы загрузит его
+/// loadHTMLString'ом с адресом wk://pc/<host>/<path>.
+- (void)deliverHTML:(NSString *)html url:(NSString *)url completion:(PCProxyCompletion)completion {
     NSURL *pageURL = [self webURLForOrigin:url];
+    NSString *page = pageURL.absoluteString;
+    if (page.length == 0) { page = @""; }
     [self finish:completion
             mime:@"__html__"
-         headers:@{@"pageURL": pageURL.absoluteString ?: @""}
+         headers:@{ @"pageURL": page }
             body:[html dataUsingEncoding:NSUTF8StringEncoding]
            error:nil];
 }
@@ -298,7 +308,9 @@ static NSString * const kRootDomain = @"perchance.org";
           body:(NSData *)body
          error:(NSError *)error {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (completion) { completion(mime, headers, body, error); }
+        if (completion != nil) {
+            completion(mime, headers, body, error);
+        }
     });
 }
 
