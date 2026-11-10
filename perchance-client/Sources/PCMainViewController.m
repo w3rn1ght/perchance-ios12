@@ -5,8 +5,8 @@
 
 @interface PCMainViewController () <WKNavigationDelegate, WKUIDelegate, UITextFieldDelegate>
 @property (nonatomic, strong) PCProxy *proxy;
-@property (nonatomic, strong, readwrite) PCTranspilerProtocolHandler *handler;
-@property (nonatomic, strong, readwrite) WKWebView *web;
+@property (nonatomic, strong) PCTranspilerProtocolHandler *handler;
+@property (nonatomic, strong) WKWebView *web;
 @property (nonatomic, strong) UITextField *addressField;
 @property (nonatomic, strong) UIProgressView *progress;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
@@ -18,10 +18,13 @@
 
 @implementation PCMainViewController
 
+@synthesize web = _web;
+@synthesize handler = _handler;
+
 - (instancetype)initWithProxy:(PCProxy *)proxy
                       handler:(PCTranspilerProtocolHandler *)handler
                     startPath:(NSString *)path {
-    if ((self = [super init])) {
+    if ((self = [super initWithNibName:nil bundle:nil])) {
         _proxy = proxy;
         _handler = handler;
         _startPath = path.length ? path : @"/welcome";
@@ -43,7 +46,9 @@
 
 #pragma mark - Верхняя панель
 
-- (UIColor *)barColor { return [UIColor colorWithWhite:0.11 alpha:1]; }
+- (UIColor *)barColor {
+    return [UIColor colorWithWhite:0.11 alpha:1];
+}
 
 - (void)buildChrome {
     UIView *bar = [[UIView alloc] init];
@@ -77,7 +82,7 @@
     self.progress.hidden = YES;
     [bar addSubview:self.progress];
 
-    self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
+    self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
     self.spinner.translatesAutoresizingMaskIntoConstraints = NO;
     self.spinner.hidesWhenStopped = YES;
     [bar addSubview:self.spinner];
@@ -122,8 +127,11 @@
     b.tintColor = [UIColor colorWithWhite:0.9 alpha:1];
     if (@available(iOS 13.0, *)) {
         UIImage *img = [UIImage systemImageNamed:symbol];
-        if (img) { [b setImage:img forState:UIControlStateNormal]; }
-        else { [b setTitle:@"•" forState:UIControlStateNormal]; }
+        if (img) {
+            [b setImage:img forState:UIControlStateNormal];
+        } else {
+            [b setTitle:@"•" forState:UIControlStateNormal];
+        }
     } else {
         [b setTitle:[symbol containsString:@"chevron"] ? @"‹" : @"⟳" forState:UIControlStateNormal];
         b.titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightMedium];
@@ -143,8 +151,7 @@
     [cfg setURLSchemeHandler:self.handler forURLScheme:PCScheme];
 
     WKUserContentController *ucc = [[WKUserContentController alloc] init];
-    NSString *marker = @"window.__perchanceClient = true;";
-    WKUserScript *us = [[WKUserScript alloc] initWithSource:marker
+    WKUserScript *us = [[WKUserScript alloc] initWithSource:@"window.__perchanceClient = true;"
                                               injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                            forMainFrameOnly:NO];
     [ucc addUserScript:us];
@@ -161,7 +168,9 @@
     }
     self.handler.webView = self.web;
 
-    [self.web addObserver:self forKeyPath:@"estimatedProgress" options:NSKeyValueObservingOptionNew context:NULL];
+    [self.web addObserver:self forKeyPath:@"estimatedProgress"
+                  options:NSKeyValueObservingOptionNew
+                  context:NULL];
     [self.view addSubview:self.web];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -173,12 +182,16 @@
 }
 
 - (void)dealloc {
-    @try { [self.web removeObserver:self forKeyPath:@"estimatedProgress"]; } @catch (NSException *e) {}
+    @try {
+        [self.web removeObserver:self forKeyPath:@"estimatedProgress"];
+    } @catch (NSException *e) {}
 }
 
 - (void)loadPath:(NSString *)path {
     NSString *p = path;
-    if (![p hasPrefix:@"/"]) { p = [@"/" stringByAppendingString:p]; }
+    if (![p hasPrefix:@"/"]) {
+        p = [@"/" stringByAppendingString:p];
+    }
     NSString *origin = [NSString stringWithFormat:@"perchance.org%@", p];
     NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@/%@", PCScheme, PCSchemeHost, origin]];
     NSURLRequest *req = [NSURLRequest requestWithURL:url
@@ -192,18 +205,29 @@
     [textField resignFirstResponder];
     if (!text.length) { return YES; }
 
-    if (![text hasPrefix:@"http"]) { text = [@"https://" stringByAppendingString:text]; }
+    if (![text hasPrefix:@"http"]) {
+        text = [@"https://" stringByAppendingString:text];
+    }
     NSURLComponents *c = [NSURLComponents componentsWithString:text];
-    NSString *host = [c.host lowercaseString] ?: @"perchance.org";
-    if (![host containsString:@"perchance.org"]) { host = @"perchance.org"; }
+    NSString *host = [[c.host lowercaseString] copy];
+    if (host.length == 0 || ![host containsString:@"perchance.org"]) {
+        host = @"perchance.org";
+    }
     NSString *path = c.path.length ? c.path : @"/welcome";
-    if (c.query) { path = [path stringByAppendingFormat:@"?%@", c.query]; }
+    if (c.query) {
+        path = [path stringByAppendingFormat:@"?%@", c.query];
+    }
     [self loadPath:[NSString stringWithFormat:@"%@%@", host, path]];
     return YES;
 }
 
-- (void)goBack { if (self.web.canGoBack) { [self.web goBack]; } }
-- (void)reload { [self.web reload]; }
+- (void)goBack {
+    if (self.web.canGoBack) { [self.web goBack]; }
+}
+
+- (void)reload {
+    [self.web reload];
+}
 
 - (void)observeValueForKeyPath:(NSString *)keyPath
                       ofObject:(id)object
@@ -248,7 +272,9 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
 - (NSString *)displayURLFor:(NSURL *)url {
     NSString *s = url.absoluteString ?: @"";
     NSString *prefix = [NSString stringWithFormat:@"%@://%@/", PCScheme, PCSchemeHost];
-    if ([s hasPrefix:prefix]) { s = [s substringFromIndex:prefix.length]; }
+    if ([s hasPrefix:prefix]) {
+        s = [s substringFromIndex:prefix.length];
+    }
     return s;
 }
 
@@ -258,7 +284,9 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
     createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration
                forNavigationAction:(WKNavigationAction *)action
                     windowFeatures:(WKWindowFeatures *)features {
-    if (!action.targetFrame) { [webView loadRequest:action.request]; }
+    if (action.targetFrame == nil) {
+        [webView loadRequest:action.request];
+    }
     return nil;
 }
 

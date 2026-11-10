@@ -1,31 +1,30 @@
 #import <Foundation/Foundation.h>
+#import <WebKit/WebKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// Колбэк моста: результат (или nil) и ошибка (или nil).
 typedef void (^PCHandler)(id _Nullable result, NSError * _Nullable error);
 
-@class WKWebView;
-
-/// Мост между нативным кодом и JavaScript-транспайлером в WKWebView.
-/// Внутри бандла лежит WKWebView, в который загружен `web/bridge.html`:
-/// там запускается Babel (@babel/standalone) и обслуживаются запросы
-/// страниц Perchance.
+/// Транспайлер внутри приложения.
+///
+/// WebKit не даёт перехватывать тела ответов, поэтому переписывать код нужно
+/// ДО того, как файл попадёт в страницу. Здесь — скрытый WKWebView с Babel
+/// (@babel/standalone): он принимает исходный текст по мосту
+/// (window.webkit.messageHandlers.pc) и возвращает совместимый код.
 @interface PCJSTranspiler : NSObject
 
-/// Загружает bridge.html. Обработчик вызывается один раз, когда Babel готов.
-- (void)startWithCompletion:(PCHandler)completion;
+- (void)startWithCompletion:(nullable PCHandler)completion;
 
-/// Переписывает JS-код под Safari 12.
-/// result.data — строка с новым кодом.
 - (void)transformJS:(NSString *)code
            filename:(NSString *)filename
-          completion:(PCHandler)completion;
+         completion:(nullable PCHandler)completion;
 
-/// Патчит CSS (inset/aspect-ratio/gap/light-dark/oklch…).
-- (void)patchCSS:(NSString *)css completion:(PCHandler)completion;
+- (void)patchCSS:(NSString *)css completion:(nullable PCHandler)completion;
 
-/// Выполняет произвольный JS в bridge (для отладки).
-- (void)evaluate:(NSString *)script completion:(PCHandler)completion;
+- (NSString *)transformHTMLString:(NSString *)html;
+
+- (void)evaluate:(NSString *)script completion:(nullable PCHandler)completion;
 
 @property (nonatomic, readonly) BOOL isReady;
 
