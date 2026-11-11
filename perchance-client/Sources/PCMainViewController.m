@@ -59,6 +59,10 @@
 
     self.backButton = [self iconButton:@"chevron.left" action:@selector(goBack)];
     self.reloadButton = [self iconButton:@"arrow.clockwise" action:@selector(reload)];
+    // ВАЖНО: без addSubview активация constraint-ов ниже бросит
+    // «no common ancestor» и приложение упадёт на старте.
+    [bar addSubview:self.backButton];
+    [bar addSubview:self.reloadButton];
 
     self.addressField = [[UITextField alloc] init];
     self.addressField.translatesAutoresizingMaskIntoConstraints = NO;

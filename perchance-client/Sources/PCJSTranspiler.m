@@ -45,6 +45,8 @@
     self.web.UIDelegate = self;
 
     // Реальное окно: в невидимом WKWebView iOS может «усыплять» таймеры и JS.
+    // makeKeyAndVisible здесь НЕ вызываем — иначе это окно перехватит клавиатуру
+    // и first responder у основного интерфейса.
     UIWindow *win = [[UIWindow alloc] initWithFrame:CGRectMake(-4000, -4000, 320, 480)];
     win.windowLevel = UIWindowLevelNormal - 1;
     UIViewController *vc = [[UIViewController alloc] init];
@@ -54,7 +56,7 @@
     self.web.scrollView.scrollEnabled = NO;
     [vc.view addSubview:self.web];
     win.rootViewController = vc;
-    [win makeKeyAndVisible];
+    win.hidden = NO;
     self.hostWindow = win;
 
     NSString *path = [[NSBundle mainBundle] pathForResource:@"bridge" ofType:@"html" inDirectory:@"web"];
