@@ -6,9 +6,6 @@
 
 @implementation PCTranspilerProtocolHandler
 
-@synthesize proxy = _proxy;
-@synthesize webView = _webView;
-
 - (instancetype)initWithProxy:(PCProxy *)proxy {
     if ((self = [super init])) {
         _proxy = proxy;
@@ -20,15 +17,16 @@
 startURLSchemeTask:(id<WKURLSchemeTask>)urlSchemeTask {
     NSURLRequest *request = urlSchemeTask.request;
     __weak id<WKURLSchemeTask> weakTask = urlSchemeTask;
-    __weak typeof(self) weakSelf = self;
 
     [self.proxy loadRequest:request completion:^(NSString *mime,
                                                 NSDictionary<NSString *, id> *headers,
                                                 NSData *body,
                                                 NSError *error) {
         id<WKURLSchemeTask> task = weakTask;
-        if (!task) { return; }
+        if (task == nil) { return; }
 
+        // Протокол задачи строгий: сначала didReceiveResponse, потом данные,
+        // потом didFinish. Любая другая последовательность — assertion в WebKit.
         if (error != nil || body == nil) {
             NSError *e = error;
             if (e == nil) {
@@ -39,28 +37,8 @@ startURLSchemeTask:(id<WKURLSchemeTask>)urlSchemeTask {
             return;
         }
 
-        NSString *mimeType = mime;
-        NSData *payload = body;
-
-        if ([mimeType isEqualToString:@"__html__"]) {
-            NSString *pageURLString = headers[@"pageURL"];
-            NSString *html = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding];
-            WKWebView *wv = weakSelf.webView;
-            NSURL *base = request.URL;
-            if ([pageURLString isKindOfClass:[NSString class]]) {
-                NSURL *u = [NSURL URLWithString:pageURLString];
-                if (u) { base = u; }
-            }
-            @try { [task didFinish]; } @catch (NSException *ex) {}
-            if (wv != nil && html != nil) {
-                [wv loadHTMLString:html baseURL:base];
-            }
-            return;
-        }
-
-        if (mimeType.length == 0) {
-            mimeType = @"application/octet-stream";
-        }
+        NSString *contentType = mime;
+        if (contentType.length == 0) { contentType = @"application/octet-stream"; }
 
         NSMutableDictionary *responseHeaders = [NSMutableDictionary dictionary];
         for (NSString *key in headers) {
@@ -78,7 +56,7 @@ startURLSchemeTask:(id<WKURLSchemeTask>)urlSchemeTask {
                 responseHeaders[key] = value;
             }
         }
-        responseHeaders[@"Content-Type"] = mimeType;
+        responseHeaders[@"Content-Type"] = contentType;
         responseHeaders[@"Cache-Control"] = @"no-store";
 
         NSHTTPURLResponse *response =
@@ -89,10 +67,10 @@ startURLSchemeTask:(id<WKURLSchemeTask>)urlSchemeTask {
 
         @try {
             [task didReceiveResponse:response];
-            [task didReceiveData:payload];
+            [task didReceiveData:body];
             [task didFinish];
         } @catch (NSException *ex) {
-            // Задачу могли отменить навигацией — это нормально.
+            // Задачу отменили навигацией — нормальная ситуация.
         }
     }];
 }

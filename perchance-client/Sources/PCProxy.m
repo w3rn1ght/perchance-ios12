@@ -249,7 +249,12 @@ static NSString * const kRootDomain = @"perchance.org";
     }
 
     if (isHTML) {
-        [self.transpiler transformHTML:source completion:^(id result, NSError *error) {
+        // <base> нужен, чтобы относительные пути (/lib/appExtras.js и т.п.)
+        // резолвились в wk://pc/<host>/… и шли через обработчик схемы.
+        NSString *host = [[NSURL URLWithString:url] host];
+        if (host.length == 0) { host = @"perchance.org"; }
+        NSString *baseHref = [NSString stringWithFormat:@"%@://%@/%@/", PCScheme, PCSchemeHost, host];
+        [self.transpiler transformHTML:source baseHref:baseHref completion:^(id result, NSError *error) {
             NSString *out = source;
             if ([result isKindOfClass:[NSString class]]) { out = (NSString *)result; }
             [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
@@ -292,15 +297,13 @@ static NSString * const kRootDomain = @"perchance.org";
     return @"text/html; charset=utf-8";
 }
 
-/// HTML отдаётся особым маркером: обработчик схемы загрузит его
-/// loadHTMLString'ом с адресом wk://pc/<host>/<path>.
+/// HTML отдаём как обычный документ. loadHTMLString изнутри задачи схемы
+/// запускал повторную навигацию и ронял WebKit, поэтому его больше нет:
+/// относительные ссылки разрешает <base>, который вставляет transform-web.js.
 - (void)deliverHTML:(NSString *)html url:(NSString *)url completion:(PCProxyCompletion)completion {
-    NSURL *pageURL = [self webURLForOrigin:url];
-    NSString *page = pageURL.absoluteString;
-    if (page.length == 0) { page = @""; }
     [self finish:completion
-            mime:@"__html__"
-         headers:@{ @"pageURL": page }
+            mime:@"text/html; charset=utf-8"
+         headers:@{ @"Cache-Control": @"no-store" }
             body:[html dataUsingEncoding:NSUTF8StringEncoding]
            error:nil];
 }

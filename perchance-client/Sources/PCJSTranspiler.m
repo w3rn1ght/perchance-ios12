@@ -170,12 +170,16 @@ didFailProvisionalNavigation:(null_unspecified WKNavigation *)navigation
 }
 
 /// HTML переписывается целиком внутри JS (без сети).
-- (void)transformHTML:(NSString *)html completion:(nullable PCHandler)completion {
+- (void)transformHTML:(NSString *)html
+             baseHref:(nullable NSString *)baseHref
+           completion:(nullable PCHandler)completion {
     if (!self.ready) {
         if (completion) { completion(nil, [self error:@"Babel ещё не загружен"]); }
         return;
     }
-    [self callFunction:@"transformHTML" args:@[ html ?: @"" ] completion:completion];
+    [self callFunction:@"transformHTML"
+                  args:@[ html ?: @"", baseHref ?: @"" ]
+            completion:completion];
 }
 
 - (NSString *)jsonLiteral:(NSString *)string {

@@ -217,6 +217,16 @@
       });
     }
 
+    // iOS-клиент: <base> для схемы wk:// — относительные пути остаются в прокси.
+    if (opts.baseHref) {
+      var baseTag = '<base href="' + String(opts.baseHref).replace(/"/g, '&quot;') + '">';
+      if (/<head\b[^>]*>/i.test(out)) {
+        out = out.replace(/<head\b[^>]*>/i, function (m) { return m + baseTag; });
+      } else {
+        out = baseTag + out;
+      }
+    }
+
     // iOS-клиент: маркер для загрузчика полифилов в WKUserScript.
     if (opts.clientMarker) {
       out = out.replace(/<head\b[^>]*>/i, function (m) { return m + CLIENT_MARKER; });

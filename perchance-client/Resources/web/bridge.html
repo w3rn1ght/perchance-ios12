@@ -108,7 +108,7 @@
       } else if (f === 'patchCSS') {
         reply(id, PCTransform.patchCSS(a[0]));
       } else if (f === 'transformHTML') {
-        reply(id, PCTransform.transformHTML(a[0]));
+        reply(id, PCTransform.transformHTML(a[0], { clientMarker: true, baseHref: a[1] || null }));
       } else if (f === 'version') {
         reply(id, { version: PCTransform.VERSION, babel: window.Babel && window.Babel.version });
       } else {
