@@ -10,7 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// Экран Perchance: адресная строка + WKWebView.
 /// Все запросы идут через схему wk:// (уже переписанный JS).
 @interface PCMainViewController : UIViewController
-@property (nonatomic, copy) NSString *startPath;
+
 
 - (instancetype)initWithProxy:(PCProxy *)proxy
                       handler:(PCTranspilerProtocolHandler *)handler
@@ -20,11 +20,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong, readonly) WKWebView *web;
 @property (nonatomic, strong, readonly) PCTranspilerProtocolHandler *handler;
 
-@property (nonatomic, copy) NSString *startPath;
+
 
 - (void)loadHome;
 - (void)loadPath:(NSString *)path;
 - (void)loadOrigin:(NSString *)origin;
+
 
 @property (nonatomic, copy) NSString *startPath;
 @end
