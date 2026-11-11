@@ -30,9 +30,11 @@
             [[PCTranspilerProtocolHandler alloc] initWithProxy:proxy];
         self.handler = handler;
 
+        // The page is loaded only after Babel is ready (see the controller).
         PCMainViewController *vc =
             [[PCMainViewController alloc] initWithProxy:proxy
                                                 handler:handler
+                                             transpiler:transpiler
                                               startPath:@"/welcome"];
         self.window.rootViewController = vc;
     } @catch (NSException *exception) {
@@ -51,8 +53,7 @@
     return YES;
 }
 
-/// Если что-то упало при сборке интерфейса — показываем причину прямо на экране,
-/// а не молча выходим (на iOS 12 без Xcode лог достать сложно).
+/// If the UI cannot be built, show the reason on screen instead of disappearing.
 - (UIViewController *)fatalControllerFor:(NSException *)exception {
     UIViewController *vc = [[UIViewController alloc] init];
     vc.view.backgroundColor = [UIColor whiteColor];
@@ -62,7 +63,7 @@
     text.editable = NO;
     text.font = [UIFont fontWithName:@"Menlo" size:12] ?: [UIFont systemFontOfSize:12];
     text.text = [NSString stringWithFormat:
-        @"Perchance не смог запуститься.\n\n%@\n\n%@\n\nПришли этот текст разработчику.",
+        @"Perchance не смог запуститься.\n\n%@\n\n%@",
         exception.reason,
         [exception.callStackSymbols componentsJoinedByString:@"\n"]];
     [vc.view addSubview:text];

@@ -104,11 +104,11 @@
     var id = payload && payload.id;
     try {
       if (f === 'transformJS') {
-        reply(id, PCTransform.transformJS(a[0], { force: true }));
+        reply(id, PCTransform.transformJS(a[0], { force: true, scheme: 'wk' }));
       } else if (f === 'patchCSS') {
         reply(id, PCTransform.patchCSS(a[0]));
       } else if (f === 'transformHTML') {
-        reply(id, PCTransform.transformHTML(a[0], { clientMarker: true, baseHref: a[1] || null }));
+        reply(id, PCTransform.transformHTML(a[0], { clientMarker: true, baseHref: a[1] || null, scheme: 'wk' }));
       } else if (f === 'version') {
         reply(id, { version: PCTransform.VERSION, babel: window.Babel && window.Babel.version });
       } else {
@@ -121,7 +121,7 @@
 
   // Транспиляция HTML делает JS (быстро, без похода в native)
   window.__pcTransformHTML = function (html) {
-    return PCTransform.transformHTML(html, { clientMarker: true });
+    return PCTransform.transformHTML(html, { clientMarker: true, scheme: 'wk' });
   };
 </script>
 </body>

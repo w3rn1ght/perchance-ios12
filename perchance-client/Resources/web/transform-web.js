@@ -17,6 +17,17 @@
 
   var VERSION = '1.0.0';
 
+  function rewriteScheme(text, scheme) {
+    if (!scheme || !text) { return text; }
+    var out = text.replace(/https:\/\/([a-z0-9.-]*perchance\.org)/gi,
+      function (m, host) { return scheme + '://' + host; });
+    // Протокол-относительные ссылки: //host/perchance.org. Lookbehind в Safari 12
+    // нет, поэтому проверяем предыдущий символ вручную.
+    out = out.replace(/(^|[^:\w])\/\/([a-z0-9.-]*perchance\.org)/gi,
+      function (m, pre, host) { return pre + scheme + '://' + host; });
+    return out;
+  }
+
   /* ------------------------------------------------------------------ JS ---- */
 
   /** Код, который Safari 12 не разберёт даже синтаксически. */
@@ -48,7 +59,7 @@
       return { ok: true, code: code, skipped: true };
     }
     if (!global.Babel || typeof global.Babel.transform !== 'function') {
-      return { ok: false, code: code, error: 'Babel не загружен' };
+      return { ok: false, code: rewriteScheme(code, opts.scheme), error: 'Babel не загружен' };
     }
     try {
       var out = global.Babel.transform(code, {
@@ -65,9 +76,9 @@
           allowUndeclaredExports: true
         }
       });
-      return { ok: true, code: out.code };
+      return { ok: true, code: rewriteScheme(out.code, opts.scheme) };
     } catch (e) {
-      return { ok: false, code: code, error: String(e && e.message || e) };
+      return { ok: false, code: rewriteScheme(code, opts.scheme), error: String(e && e.message || e) };
     }
   }
 
@@ -242,6 +253,8 @@
     } else {
       out = HEAD_INJECT + out;
     }
+
+    if (opts.scheme) { out = rewriteScheme(out, opts.scheme); }
     return out;
   }
 

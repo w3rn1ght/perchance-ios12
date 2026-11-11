@@ -3,6 +3,7 @@
 
 @class PCProxy;
 @class PCTranspilerProtocolHandler;
+@class PCJSTranspiler;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -12,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithProxy:(PCProxy *)proxy
                       handler:(PCTranspilerProtocolHandler *)handler
+                   transpiler:(PCJSTranspiler *)transpiler
                     startPath:(nullable NSString *)path;
 
 @property (nonatomic, strong, readonly) WKWebView *web;
@@ -19,6 +21,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)loadHome;
 - (void)loadPath:(NSString *)path;
+- (void)loadOrigin:(NSString *)origin;
 
 @end
 

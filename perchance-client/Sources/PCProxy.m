@@ -5,7 +5,7 @@
 
 NSString * const PCScheme = @"wk";
 NSString * const PCSchemeHost = @"pc";
-NSString * const PCCacheDirectory = @"PCProxyCache";
+NSString * const PCCacheDirectory = @"PCProxyCache3";
 
 static NSString * const kRootDomain = @"perchance.org";
 
@@ -74,20 +74,17 @@ static NSString * const kRootDomain = @"perchance.org";
 
 #pragma mark - Адреса
 
-/// wk://pc/a257….perchance.org/welcome?x=1 → https://a257….perchance.org/welcome?x=1
+/// wk://a257….perchance.org/welcome?x=1 → https://a257….perchance.org/welcome?x=1
+///
+/// ВАЖНО: хост живёт в самом URL схемы, а не в пути. Иначе абсолютные пути
+/// вида `/lib/appExtras.js` резолвятся от origin (wk://pc) и хост теряется.
 - (nullable NSString *)originURLStringForRequest:(NSURLRequest *)request {
     NSString *raw = request.URL.absoluteString;
-    NSString *prefix = [NSString stringWithFormat:@"%@://%@/", PCScheme, PCSchemeHost];
+    NSString *prefix = [NSString stringWithFormat:@"%@://", PCScheme];
     if (![raw hasPrefix:prefix]) { return nil; }
-    NSString *encoded = [raw substringFromIndex:prefix.length];
-    NSString *decoded = [encoded stringByRemovingPercentEncoding];
-    if (decoded.length == 0) { decoded = encoded; }
-
-    NSRange slash = [decoded rangeOfString:@"/"];
-    NSString *host = slash.location == NSNotFound ? decoded : [decoded substringToIndex:slash.location];
-    NSString *rest = slash.location == NSNotFound ? @"" : [decoded substringFromIndex:slash.location];
-    if (host.length == 0) { host = kRootDomain; }
-    return [NSString stringWithFormat:@"https://%@%@", host, rest];
+    NSString *rest = [raw substringFromIndex:prefix.length];
+    if (rest.length == 0) { return nil; }
+    return [@"https://" stringByAppendingString:rest];
 }
 
 - (BOOL)isPerchanceHost:(NSString *)host {
@@ -96,9 +93,9 @@ static NSString * const kRootDomain = @"perchance.org";
     return [h hasSuffix:[@"." stringByAppendingString:kRootDomain]];
 }
 
-/// Публичный адрес страницы — нужен, чтобы относительные ссылки шли через нас.
+/// Адрес страницы внутри схемы: wk://<настоящий-хост>/<путь>
 - (NSURL *)webURLForOrigin:(NSString *)origin {
-    return [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@/%@", PCScheme, PCSchemeHost, origin]];
+    return [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@", PCScheme, origin]];
 }
 
 /// Полифилы, Babel и compat.css лежат в Resources/web — отдаём их из бандла.
@@ -249,16 +246,21 @@ static NSString * const kRootDomain = @"perchance.org";
     }
 
     if (isHTML) {
-        // <base> нужен, чтобы относительные пути (/lib/appExtras.js и т.п.)
-        // резолвились в wk://pc/<host>/… и шли через обработчик схемы.
+        // <base> фиксирует origin схемы: относительные и абсолютные пути
+        // (/lib/appExtras.js) остаются на том же хосте и идут через прокси.
         NSString *host = [[NSURL URLWithString:url] host];
         if (host.length == 0) { host = @"perchance.org"; }
-        NSString *baseHref = [NSString stringWithFormat:@"%@://%@/%@/", PCScheme, PCSchemeHost, host];
+        NSString *baseHref = [NSString stringWithFormat:@"%@://%@/", PCScheme, host];
         [self.transpiler transformHTML:source baseHref:baseHref completion:^(id result, NSError *error) {
-            NSString *out = source;
-            if ([result isKindOfClass:[NSString class]]) { out = (NSString *)result; }
-            [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-            [self deliverHTML:out url:url completion:completion];
+            if ([result isKindOfClass:[NSString class]]) {
+                NSString *out = (NSString *)result;
+                [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+                [self deliverHTML:out url:url completion:completion];
+            } else {
+                // Babel не готов/не справился — НЕ кешируем и НЕ отдаём сырой HTML:
+                // иначе страница залипнет без рабочего интерфейса навсегда.
+                [self deliverHTML:source url:url completion:completion];
+            }
         }];
         return;
     }

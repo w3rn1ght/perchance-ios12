@@ -128,6 +128,49 @@
     });
   }
 
+  /* ------------------- 8. wk:// → https:// для проверок origin ------------- */
+  // Приложение отдаёт страницы по схеме wk://, а Perchance сравнивает origin
+  // с https://<id>.perchance.org. Нормализуем «на лету», иначе обработчики
+  // postMessage между страницей и iframe генератора молча отбрасываются.
+  (function () {
+    function asHttps(v) {
+      if (typeof v !== 'string') { return v; }
+      return v.replace(/^wk:\/\//, 'https://');
+    }
+    try {
+      var d = Object.getOwnPropertyDescriptor(W.MessageEvent.prototype, 'origin');
+      if (d && d.get) {
+        Object.defineProperty(W.MessageEvent.prototype, 'origin', {
+          configurable: true,
+          enumerable: d.enumerable,
+          get: function () { return asHttps(d.get.call(this)); }
+        });
+      }
+    } catch (e) {}
+    try {
+      var L = W.Location && W.Location.prototype;
+      var dl = L && Object.getOwnPropertyDescriptor(L, 'origin');
+      if (dl && dl.get) {
+        Object.defineProperty(L, 'origin', {
+          configurable: true,
+          enumerable: dl.enumerable,
+          get: function () { return asHttps(dl.get.call(this)); }
+        });
+      }
+    } catch (e) {}
+    try {
+      var origPost = W.postMessage;
+      W.postMessage = function (message, targetOrigin, transfer) {
+        var target = targetOrigin;
+        if (typeof target === 'string' &&
+            /^https:\/\/[a-z0-9.-]*perchance\.org$/i.test(target)) {
+          target = 'wk://' + target.slice('https://'.length);
+        }
+        return origPost.call(W, message, target, transfer);
+      };
+    } catch (e) {}
+  }());
+
   try {
     console.info('[legacy-portal] runtime loaded');
   } catch (e) {}

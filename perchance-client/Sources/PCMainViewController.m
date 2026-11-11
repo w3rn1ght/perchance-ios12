@@ -2,10 +2,12 @@
 #import <WebKit/WebKit.h>
 #import "PCProxy.h"
 #import "PCTranspilerProtocolHandler.h"
+#import "PCJSTranspiler.h"
 
 @interface PCMainViewController () <WKNavigationDelegate, WKUIDelegate, UITextFieldDelegate>
 @property (nonatomic, strong) PCProxy *proxy;
 @property (nonatomic, strong) PCTranspilerProtocolHandler *handler;
+@property (nonatomic, strong) PCJSTranspiler *transpiler;
 @property (nonatomic, strong) WKWebView *web;
 @property (nonatomic, strong) UITextField *addressField;
 @property (nonatomic, strong) UIProgressView *progress;
@@ -13,6 +15,7 @@
 @property (nonatomic, strong) UIButton *backButton;
 @property (nonatomic, strong) UIButton *reloadButton;
 @property (nonatomic, strong) UIView *chromeBar;
+@property (nonatomic, strong) UILabel *bootLabel;
 @property (nonatomic, copy) NSString *startPath;
 @end
 
@@ -23,10 +26,12 @@
 
 - (instancetype)initWithProxy:(PCProxy *)proxy
                       handler:(PCTranspilerProtocolHandler *)handler
+                   transpiler:(PCJSTranspiler *)transpiler
                     startPath:(NSString *)path {
     if ((self = [super initWithNibName:nil bundle:nil])) {
         _proxy = proxy;
         _handler = handler;
+        _transpiler = transpiler;
         _startPath = path.length ? path : @"/welcome";
     }
     return self;
@@ -37,6 +42,48 @@
     self.view.backgroundColor = [UIColor colorWithWhite:0.07 alpha:1];
     [self buildChrome];
     [self buildWebView];
+    [self waitForTranspilerThenLoad];
+}
+
+/// Пока Babel не готов, страницу грузить нельзя: HTML и скрипты ушли бы
+/// наверх без переписывания — интерфейс отрисовался бы «мёртвым».
+- (void)waitForTranspilerThenLoad {
+    self.bootLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.bootLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.bootLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1];
+    self.bootLabel.font = [UIFont systemFontOfSize:13];
+    self.bootLabel.textAlignment = NSTextAlignmentCenter;
+    self.bootLabel.numberOfLines = 0;
+    self.bootLabel.text = @"Готовлю JavaScript для iOS 12…";
+    [self.view addSubview:self.bootLabel];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.bootLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [self.bootLabel.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [self.bootLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
+        [self.bootLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24]
+    ]];
+
+    if (self.transpiler.isReady) {
+        [self beginLoading];
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    [self.transpiler startWithCompletion:^(id result, NSError *error) {
+        PCMainViewController *strongSelf = weakSelf;
+        if (strongSelf == nil) { return; }
+        if (error != nil) {
+            strongSelf.bootLabel.text = [NSString stringWithFormat:
+                @"Не удалось подготовить JavaScript:\n%@", error.localizedDescription];
+            return;
+        }
+        [strongSelf beginLoading];
+    }];
+}
+
+- (void)beginLoading {
+    [self.bootLabel removeFromSuperview];
+    self.bootLabel = nil;
     [self loadHome];
 }
 
@@ -190,8 +237,19 @@
     if (![p hasPrefix:@"/"]) {
         p = [@"/" stringByAppendingString:p];
     }
-    NSString *origin = [NSString stringWithFormat:@"perchance.org%@", p];
-    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@/%@", PCScheme, PCSchemeHost, origin]];
+    [self loadOrigin:[@"perchance.org" stringByAppendingString:p]];
+}
+
+/// origin — «хост/путь» без схемы: "perchance.org/welcome",
+/// "a257….perchance.org/welcome". Схема подставляется своя (wk://), чтобы
+/// запрос попал в наш WKURLSchemeHandler.
+- (void)loadOrigin:(NSString *)origin {
+    NSString *o = origin.length ? origin : @"perchance.org/welcome";
+    if ([o hasPrefix:@"/"]) {
+        o = [@"perchance.org" stringByAppendingString:o];
+    }
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@", PCScheme, o]];
+    if (url == nil) { return; }
     NSURLRequest *req = [NSURLRequest requestWithURL:url
                                          cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
                                      timeoutInterval:45];
@@ -215,7 +273,7 @@
     if (c.query) {
         path = [path stringByAppendingFormat:@"?%@", c.query];
     }
-    [self loadPath:[NSString stringWithFormat:@"%@%@", host, path]];
+    [self loadOrigin:[NSString stringWithFormat:@"%@%@", host, path]];
     return YES;
 }
 
@@ -269,7 +327,7 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
 
 - (NSString *)displayURLFor:(NSURL *)url {
     NSString *s = url.absoluteString ?: @"";
-    NSString *prefix = [NSString stringWithFormat:@"%@://%@/", PCScheme, PCSchemeHost];
+    NSString *prefix = [NSString stringWithFormat:@"%@://", PCScheme];
     if ([s hasPrefix:prefix]) {
         s = [s substringFromIndex:prefix.length];
     }
@@ -278,14 +336,49 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
 
 #pragma mark - WKUIDelegate
 
+/// window.open() и target=_blank: Perchance открывает так главное меню и
+/// ссылки сообщества. Раньше мы возвращали nil, а action.request мог быть
+/// с враждебной схемой (http/https) — WebKit на этом падал.
+/// Теперь: переводим навигацию в нашу схему и грузим в том же WebView.
 - (WKWebView *)webView:(WKWebView *)webView
     createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration
                forNavigationAction:(WKNavigationAction *)action
                     windowFeatures:(WKWindowFeatures *)features {
-    if (action.targetFrame == nil) {
-        [webView loadRequest:action.request];
+    NSURL *target = action.request.URL;
+    if (target != nil) {
+        NSString *origin = [self originStringForExternalURL:target];
+        if (origin.length > 0) {
+            [self loadOrigin:origin];
+        }
     }
     return nil;
+}
+
+/// https://perchance.org/x и https://<id>.perchance.org/x → "perchance.org/x"
+/// (или "<id>.perchance.org/x"). Всё остальное — "" (игнорируем).
+- (NSString *)originStringForExternalURL:(NSURL *)url {
+    NSString *scheme = [url.scheme lowercaseString];
+    NSString *host = [url.host lowercaseString];
+    NSString *path = url.path;
+    if (path.length == 0) { path = @"/"; }
+
+    if ([scheme isEqualToString:PCScheme]) {
+        // уже внутри прокси: host уже настоящий
+        if (host.length == 0) { return @""; }
+        return [host stringByAppendingString:path];
+    }
+    if ([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"]) {
+        if (host.length == 0) { return @""; }
+        if (![host isEqualToString:@"perchance.org"] &&
+            ![host hasSuffix:@".perchance.org"]) {
+            return @"";
+        }
+        NSString *query = url.query;
+        NSString *out = [host stringByAppendingString:path];
+        if (query.length) { out = [out stringByAppendingFormat:@"?%@", query]; }
+        return out;
+    }
+    return @"";
 }
 
 - (void)webView:(WKWebView *)webView
