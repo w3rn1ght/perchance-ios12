@@ -349,6 +349,10 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
         NSString *origin = [self originStringForExternalURL:target];
         if (origin.length > 0) {
             [self loadOrigin:origin];
+        } else if ([[target scheme] isEqualToString:@"http"] ||
+                   [[target scheme] isEqualToString:@"https"]) {
+            // Внешний сайт (например форум lemmy.world) — открываем в Safari.
+            [[UIApplication sharedApplication] openURL:target options:@{} completionHandler:nil];
         }
     }
     return nil;
