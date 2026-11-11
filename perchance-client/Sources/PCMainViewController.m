@@ -30,7 +30,7 @@
         _proxy = proxy;
         _handler = handler;
         _transpiler = transpiler;
-        _startPath = [NSString stringWithFormat:@"perchance.org%@", path];
+        _startPath = path;
     }
     return self;
 }
@@ -44,7 +44,11 @@
 }
 
 - (void)loadHome {
-    [self loadPath:@"/welcome"];
+    if (_startPath.length) {
+        [self loadPath:_startPath];
+    } else {
+        [self loadPath:@"/welcome"];
+    }
 }
 
 - (void)loadPath:(NSString *)path {
