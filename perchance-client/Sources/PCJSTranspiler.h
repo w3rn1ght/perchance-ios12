@@ -22,7 +22,10 @@ typedef void (^PCHandler)(id _Nullable result, NSError * _Nullable error);
 
 - (void)patchCSS:(NSString *)css completion:(nullable PCHandler)completion;
 
-- (NSString *)transformHTMLString:(NSString *)html;
+/// Переписать HTML. Асинхронно — вызывающий уже находится в главном потоке,
+/// а evaluateJavaScript завершается тоже в главном: синхронное ожидание
+/// семафора здесь привело бы к дедлоку.
+- (void)transformHTML:(NSString *)html completion:(nullable PCHandler)completion;
 
 - (void)evaluate:(NSString *)script completion:(nullable PCHandler)completion;
 

@@ -167,20 +167,13 @@ didFailProvisionalNavigation:(null_unspecified WKNavigation *)navigation
     [self callFunction:@"patchCSS" args:@[ css ?: @"" ] completion:completion];
 }
 
-/// HTML переписывается целиком внутри JS (без сети), поэтому идёт синхронно.
-- (NSString *)transformHTMLString:(NSString *)html {
-    if (!self.ready || !self.web) { return html; }
-
-    __block NSString *result = nil;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    NSString *script = [NSString stringWithFormat:@"window.__pcTransformHTML(%@)", [self jsonLiteral:html]];
-    [self.web evaluateJavaScript:script completionHandler:^(id value, NSError *error) {
-        if ([value isKindOfClass:[NSString class]]) { result = (NSString *)value; }
-        dispatch_semaphore_signal(sem);
-    }];
-    // Не блокируем главный поток бесконечно: HTML приходит уже после прогрева Babel.
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)));
-    return result ?: html;
+/// HTML переписывается целиком внутри JS (без сети).
+- (void)transformHTML:(NSString *)html completion:(nullable PCHandler)completion {
+    if (!self.ready) {
+        if (completion) { completion(nil, [self error:@"Babel ещё не загружен"]); }
+        return;
+    }
+    [self callFunction:@"transformHTML" args:@[ html ?: @"" ] completion:completion];
 }
 
 - (NSString *)jsonLiteral:(NSString *)string {

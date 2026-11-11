@@ -249,9 +249,12 @@ static NSString * const kRootDomain = @"perchance.org";
     }
 
     if (isHTML) {
-        NSString *out = [self.transpiler transformHTMLString:source];
-        [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-        [self deliverHTML:out url:url completion:completion];
+        [self.transpiler transformHTML:source completion:^(id result, NSError *error) {
+            NSString *out = source;
+            if ([result isKindOfClass:[NSString class]]) { out = (NSString *)result; }
+            [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+            [self deliverHTML:out url:url completion:completion];
+        }];
         return;
     }
 

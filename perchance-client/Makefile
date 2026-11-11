@@ -13,6 +13,10 @@ Perchance_FILES := $(wildcard Sources/*.m)
 Perchance_CFLAGS := -fobjc-arc -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations
 Perchance_CFLAGS += -Wno-unused-function -Wno-sign-compare -Wno-unknown-warning-option
 Perchance_CFLAGS += -Wno-unused-variable -Wno-missing-braces -Wno-format-nonliteral
+# Xcode 16 + SDK 12.4: шум от старого SDK и nullability-разметки не должен
+# валить сборку (в проекте включён -Werror).
+Perchance_CFLAGS += -Wno-nullability-completeness -Wno-nullable-to-nonnull-conversion
+Perchance_CFLAGS += -Wno-deprecated-module-dot-map -Wno-self-assign -Wno-unused-but-set-variable
 
 Perchance_FRAMEWORKS := UIKit Foundation WebKit JavaScriptCore Security
 

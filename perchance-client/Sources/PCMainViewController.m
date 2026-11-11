@@ -121,21 +121,15 @@
     ]];
 }
 
+/// SF Symbols появились только в SDK 13, а мы собираемся SDK 12.4 —
+/// поэтому кнопки рисуем обычными типографскими глифами (работают везде).
 - (UIButton *)iconButton:(NSString *)symbol action:(SEL)action {
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     b.translatesAutoresizingMaskIntoConstraints = NO;
     b.tintColor = [UIColor colorWithWhite:0.9 alpha:1];
-    if (@available(iOS 13.0, *)) {
-        UIImage *img = [UIImage systemImageNamed:symbol];
-        if (img) {
-            [b setImage:img forState:UIControlStateNormal];
-        } else {
-            [b setTitle:@"•" forState:UIControlStateNormal];
-        }
-    } else {
-        [b setTitle:[symbol containsString:@"chevron"] ? @"‹" : @"⟳" forState:UIControlStateNormal];
-        b.titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightMedium];
-    }
+    BOOL isBack = [symbol containsString:@"chevron"];
+    [b setTitle:(isBack ? @"\u2039" : @"\u27F3") forState:UIControlStateNormal];
+    b.titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightRegular];
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return b;
 }
