@@ -199,6 +199,48 @@ start.bat                     # сервер (нужен, чтобы отдат�
 
 ---
 
+## Диагностика на устройстве
+
+`idevicesyslog` — это утилита **для компьютера** (пакет libimobiledevice), на самом
+телефоне её нет. На iOS 12 лог смотрят иначе.
+
+**1. Лог исключений приложения** (появился в 1.0.1). Файл лежит в Documents
+приложения:
+
+```sh
+find /var/mobile/Containers/Data/Application -name perchance-crash.log 2>/dev/null
+cat "$(find /var/mobile/Containers/Data/Application -name perchance-crash.log | head -1)"
+```
+
+В Filza: `Apps → Perchance → perchance-crash.log`.
+
+**2. Отчёты о падении системы** (если приложение убили до запуска кода):
+
+```sh
+ls -t /var/mobile/Library/Logs/CrashReporter/ | head
+cat "$(ls -t /var/mobile/Library/Logs/CrashReporter/Perchance* | head -1)" | head -60
+```
+
+**3. Запуск бинаря вручную** — сразу видно ошибки dyld/подписи:
+
+```sh
+cd /Applications/Perchance.app && ./Perchance
+```
+
+**4. Если нужен именно syslog** — поставь на телефон твик `syslogd`
+(Cydia/Sileo) и смотри `tail -f /var/log/syslog`. Либо на компьютере:
+
+```sh
+# macOS
+brew install libimobiledevice && idevicesyslog | grep perchance-client
+# Windows: scoop install libimobiledevice  (или релизы libimobiledevice-win32)
+```
+
+**Что искать:** строку `[perchance-client] launch failed:` или
+`НЕОБРАБОТАННОЕ ИСКЛЮЧЕНИЕ:` — там будет причина и стек.
+
+---
+
 ## Лицензия
 
 Код клиента — MIT. `babel.min.js` — MIT (© Babel contributors),
