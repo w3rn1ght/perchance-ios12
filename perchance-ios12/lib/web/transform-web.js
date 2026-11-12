@@ -49,7 +49,9 @@
     ['e.stack.toString().match(/<anonymous>:([0-9]+):[0-9]/)?.[1]',
      '(e.stack.toString().match(/<anonymous>:([0-9]+):[0-9]/)||[])[1]'],
     ['e.stack.toString().match(/> Function:([0-9]+):[0-9]/)?.[1]',
-     '(e.stack.toString().match(/> Function:([0-9]+):[0-9]/)||[])[1]']
+     '(e.stack.toString().match(/> Function:([0-9]+):[0-9]/)||[])[1]'],
+    ['import.meta.url', '(document.currentScript?document.currentScript.src:location.href)'],
+    ['import.meta', '{}']
   ];
 
   function patchRuntimeStrings(code) {

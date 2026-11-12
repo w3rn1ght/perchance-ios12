@@ -1,6 +1,6 @@
 Package: com.w3rn1ght.perchance
 Name: Perchance
-Version: 1.0.10
+Version: 1.0.11
 Architecture: iphoneos-arm
 Description: Клиент Perchance для iOS 12 с джейлбрейком. Прозрачно переписывает современный JavaScript сайта под Safari 12 (Babel в WKWebView) — интерфейс Perchance работает целиком.
 Homepage: https://perchance.org
