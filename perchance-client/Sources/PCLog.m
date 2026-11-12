@@ -92,9 +92,11 @@ void PCLogError(NSString *format, ...) {
 }
 
 void PCLogMemory(NSString *tag) {
-    struct mach_task_basic_info info;
-    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-    kern_return_t kr = task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+    // phys_footprint есть только в task_vm_info (в mach_task_basic_info его
+    // нет в SDK 12.4), а именно он ближе всего к тому, за что убивает jetsam.
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    kern_return_t kr = task_info(mach_task_self(), TASK_VM_INFO,
                                  (task_info_t)&info, &count);
     if (kr != KERN_SUCCESS) {
         PCLog(@"memory[%@]: недоступно (%d)", tag, (int)kr);
