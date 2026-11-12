@@ -6,8 +6,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Обработчик схемы wk:// для WKWebView.
 ///
-/// Отдаёт переписанные файлы, а HTML — через loadHTMLString с адресом
-/// wk://pc/<host>/<path>, чтобы относительные ссылки оставались в прокси.
+/// Отдаёт переписанные файлы в том же порядке, который требует WebKit:
+/// didReceiveResponse → didReceiveData → didFinish. Остановленные задачи
+/// (после stopURLSchemeTask) никогда не трогаем — иначе WebKit падает.
 @interface PCTranspilerProtocolHandler : NSObject <WKURLSchemeHandler>
 
 - (instancetype)initWithProxy:(PCProxy *)proxy NS_DESIGNATED_INITIALIZER;

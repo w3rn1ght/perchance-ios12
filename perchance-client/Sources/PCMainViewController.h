@@ -11,7 +11,6 @@ NS_ASSUME_NONNULL_BEGIN
 /// Все запросы идут через схему wk:// (уже переписанный JS).
 @interface PCMainViewController : UIViewController
 
-
 - (instancetype)initWithProxy:(PCProxy *)proxy
                       handler:(PCTranspilerProtocolHandler *)handler
                    transpiler:(PCJSTranspiler *)transpiler
@@ -19,15 +18,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, strong, readonly) WKWebView *web;
 @property (nonatomic, strong, readonly) PCTranspilerProtocolHandler *handler;
-
-
+@property (nonatomic, copy) NSString *startPath;
 
 - (void)loadHome;
 - (void)loadPath:(NSString *)path;
 - (void)loadOrigin:(NSString *)origin;
 
-
-@property (nonatomic, copy) NSString *startPath;
 @end
 
 NS_ASSUME_NONNULL_END

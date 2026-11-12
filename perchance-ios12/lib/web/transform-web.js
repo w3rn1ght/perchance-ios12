@@ -65,10 +65,12 @@
       var out = global.Babel.transform(code, {
         presets: targetPresets(),
         sourceType: opts.sourceType === 'module' ? 'module' : 'script',
-        compact: false,
+        // compact/comments — не косметика: на iOS 12 каждые лишние мегабайты
+        // текста в мосте Babel приближают jetsam. Кеш на диске тоже меньше.
+        compact: true,
+        comments: false,
         babelrc: false,
         configFile: false,
-        comments: true,
         parserOpts: {
           allowReturnOutsideFunction: true,
           allowAwaitOutsideFunction: true,

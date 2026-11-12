@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
@@ -15,6 +16,13 @@ typedef void (^PCHandler)(id _Nullable result, NSError * _Nullable error);
 @interface PCJSTranspiler : NSObject
 
 - (void)startWithCompletion:(nullable PCHandler)completion;
+
+/// Перезапустить мост (например, если WebContent-процесс был убит системой).
+- (void)restart;
+
+/// Окно, в которое можно повесить невидимый мост. Если не задано,
+/// транспайлер создаст своё служебное окно.
+- (void)attachToWindow:(nullable UIWindow *)window;
 
 - (void)transformJS:(NSString *)code
            filename:(NSString *)filename

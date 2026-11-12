@@ -1,11 +1,12 @@
 #import "PCProxy.h"
 #import "PCJSTranspiler.h"
+#import "PCLog.h"
 #import <Foundation/Foundation.h>
 #import <CommonCrypto/CommonDigest.h>
 
 NSString * const PCScheme = @"wk";
 NSString * const PCSchemeHost = @"pc";
-NSString * const PCCacheDirectory = @"PCProxyCache3";
+NSString * const PCCacheDirectory = @"PCProxyCache4";
 
 static NSString * const kRootDomain = @"perchance.org";
 
@@ -201,6 +202,16 @@ static NSString * const kRootDomain = @"perchance.org";
             headers:(NSDictionary *)headers
                 url:(NSString *)url
          completion:(PCProxyCompletion)completion {
+    // NSURLSession отвечает на своей очереди, а транспайлер (WKWebView с Babel)
+    // живёт на главной. Параллельные ответы десятков скриптов раньше писали
+    // в один NSMutableArray из разных потоков — это и был EXC_BAD_ACCESS.
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self processData:data mime:mime headers:headers url:url completion:completion];
+        });
+        return;
+    }
+
     NSString *lower = [mime lowercaseString];
     BOOL isHTML = [lower containsString:@"text/html"];
     BOOL isCSS = [lower containsString:@"text/css"];
@@ -223,6 +234,10 @@ static NSString * const kRootDomain = @"perchance.org";
         return;
     }
 
+    if (!self.transpiler.isReady) {
+        PCLogError(@"proxy: Babel не готов, отдаю без переписывания %@", url);
+    }
+
     NSString *source = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (source == nil) {
         [self finish:completion mime:mime headers:headers body:data error:nil];
@@ -236,6 +251,7 @@ static NSString * const kRootDomain = @"perchance.org";
     NSString *path = [[self cachePath] stringByAppendingPathComponent:[self cacheKeyForURL:url kind:kind]];
     NSString *cached = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
     if (cached.length > 0) {
+        PCLog(@"proxy: кеш %@", url);
         if (isHTML) {
             [self deliverHTML:cached url:url completion:completion];
         } else {
@@ -251,24 +267,28 @@ static NSString * const kRootDomain = @"perchance.org";
         NSString *host = [[NSURL URLWithString:url] host];
         if (host.length == 0) { host = @"perchance.org"; }
         NSString *baseHref = [NSString stringWithFormat:@"%@://%@/", PCScheme, host];
+        PCLog(@"proxy: HTML %@ (%lu симв.)", url, (unsigned long)source.length);
         [self.transpiler transformHTML:source baseHref:baseHref completion:^(id result, NSError *error) {
-            if ([result isKindOfClass:[NSString class]]) {
-                NSString *out = (NSString *)result;
-                [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-                [self deliverHTML:out url:url completion:completion];
-            } else {
-                // Babel не готов/не справился — НЕ кешируем и НЕ отдаём сырой HTML:
-                // иначе страница залипнет без рабочего интерфейса навсегда.
+            NSString *out = [result isKindOfClass:[NSString class]] ? (NSString *)result : nil;
+            // Маркер означает, что страница реально прошла через трансформер:
+            // в неё вставлены полифилы и <base>. Иначе кешировать нельзя —
+            // именно так раньше «залипал» мёртвый интерфейс.
+            BOOL ok = out.length > 0 && [out containsString:@"__legacy/legacy.js"];
+            if (!ok) {
+                PCLogError(@"proxy: HTML не переписан %@ (%@)", url,
+                           error.localizedDescription ?: @"нет маркера трансформации");
                 [self deliverHTML:source url:url completion:completion];
+                return;
             }
+            [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+            [self deliverHTML:out url:url completion:completion];
         }];
         return;
     }
 
     if (isCSS) {
         [self.transpiler patchCSS:source completion:^(id result, NSError *error) {
-            NSString *out = source;
-            if ([result isKindOfClass:[NSString class]]) { out = (NSString *)result; }
+            NSString *out = [result isKindOfClass:[NSString class]] ? (NSString *)result : source;
             [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
             [self finish:completion mime:@"text/css; charset=utf-8" headers:headers
                      body:[out dataUsingEncoding:NSUTF8StringEncoding] error:nil];
@@ -276,17 +296,24 @@ static NSString * const kRootDomain = @"perchance.org";
         return;
     }
 
+    PCLog(@"proxy: JS %@ (%lu симв.)", url, (unsigned long)source.length);
     [self.transpiler transformJS:source filename:url completion:^(id result, NSError *error) {
-        NSDictionary *dict = nil;
-        if ([result isKindOfClass:[NSDictionary class]]) { dict = (NSDictionary *)result; }
-        NSString *code = source;
-        NSString *converted = dict[@"code"];
-        if ([converted isKindOfClass:[NSString class]]) { code = converted; }
-        if ([dict[@"ok"] boolValue]) {
-            self.transformed = self.transformed + 1;
-        } else {
+        NSDictionary *dict = [result isKindOfClass:[NSDictionary class]] ? (NSDictionary *)result : nil;
+        NSString *code = [dict[@"code"] isKindOfClass:[NSString class]] ? dict[@"code"] : nil;
+        BOOL ok = [dict[@"ok"] boolValue] && code.length > 0;
+
+        if (!ok) {
             self.failed = self.failed + 1;
+            PCLogError(@"proxy: JS не переписан %@ (%@)", url,
+                       dict[@"error"] ?: error.localizedDescription ?: @"неизвестная ошибка");
+            // ВАЖНО: не кешируем исходник. Иначе современный синтаксис
+            // навсегда останется в кеше и страница будет мёртвой.
+            [self finish:completion mime:@"application/javascript; charset=utf-8" headers:headers
+                     body:[source dataUsingEncoding:NSUTF8StringEncoding] error:nil];
+            return;
         }
+
+        self.transformed = self.transformed + 1;
         [code writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
         [self finish:completion mime:@"application/javascript; charset=utf-8" headers:headers
                  body:[code dataUsingEncoding:NSUTF8StringEncoding] error:nil];
