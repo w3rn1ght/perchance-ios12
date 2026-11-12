@@ -6,7 +6,7 @@
 @property (nonatomic, strong) UILabel *hintLabel;
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) UIButton *continueButton;
-@property (nonatomic, strong) UIButton *copyLogButton;
+@property (nonatomic, strong) UIButton *clipboardButton;
 @property (nonatomic, strong) UIButton *clearButton;
 @end
 
@@ -45,11 +45,11 @@
     self.textView.text = self.logText ?: @"(лог пуст)";
     [self.view addSubview:self.textView];
 
-    self.copyLogButton = [self buttonWithTitle:@"Копировать" action:@selector(copyLog)];
+    self.clipboardButton = [self buttonWithTitle:@"Копировать" action:@selector(copyLogTapped)];
     self.clearButton = [self buttonWithTitle:@"Очистить" action:@selector(clearLog)];
     self.continueButton = [self buttonWithTitle:@"Продолжить" action:@selector(continueTapped)];
     self.continueButton.backgroundColor = [UIColor colorWithRed:0.18 green:0.44 blue:0.88 alpha:1];
-    [self.view addSubview:self.copyLogButton];
+    [self.view addSubview:self.clipboardButton];
     [self.view addSubview:self.clearButton];
     [self.view addSubview:self.continueButton];
 
@@ -96,14 +96,14 @@
 
     CGFloat half = (width - margin * 2 - gap) / 2.0;
     CGFloat smallY = buttonsY - gap - 36;
-    self.copyLogButton.frame = CGRectMake(margin, smallY, half, 36);
+    self.clipboardButton.frame = CGRectMake(margin, smallY, half, 36);
     self.clearButton.frame = CGRectMake(margin + half + gap, smallY, half, 36);
 
     self.textView.frame = CGRectMake(margin, y, width - margin * 2,
                                      smallY - 10 - y);
 }
 
-- (void)copyLog {
+- (void)copyLogTapped {
     UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
     pasteboard.string = self.logText ?: @"";
     PCLog(@"лог скопирован в буфер обмена");
