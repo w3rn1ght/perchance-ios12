@@ -33,6 +33,37 @@
   /** Код, который Safari 12 не разберёт даже синтаксически. */
   var NEEDS_TRANSPILE = /\?\.|\?\?|\|\|=|&&=|#[A-Za-z_$][\w$]*\s*[=(;]|static\s*\{/;
 
+  /**
+   * Правки внутри СТРОК, из которых Perchance собирает код в рантайме.
+   *
+   * Движок Perchance формирует текст функции (`finalFunctionBody`) и компилирует
+   * его через `new Function(...)`. Babel такой текст не видит: для него это
+   * обычный строковый литерал. Внутри обёртки есть `?.[1]` (optional chaining,
+   * Safari 13.1+), из-за чего на iOS 12 КАЖДЫЙ вызов генератора падал с
+   * SyntaxError — именно это и показывало «(syntax error)» вместо текста.
+   *
+   * Патчим ровно два места в исходнике (точное совпадение), чтобы Babel потом
+   * не пришлось угадывать: `match(...)?.[1]` → `(match(...)||[])[1]`.
+   */
+  var RUNTIME_STRING_PATCHES = [
+    ['e.stack.toString().match(/<anonymous>:([0-9]+):[0-9]/)?.[1]',
+     '(e.stack.toString().match(/<anonymous>:([0-9]+):[0-9]/)||[])[1]'],
+    ['e.stack.toString().match(/> Function:([0-9]+):[0-9]/)?.[1]',
+     '(e.stack.toString().match(/> Function:([0-9]+):[0-9]/)||[])[1]']
+  ];
+
+  function patchRuntimeStrings(code) {
+    if (!code) { return code; }
+    var out = code;
+    for (var i = 0; i < RUNTIME_STRING_PATCHES.length; i++) {
+      var from = RUNTIME_STRING_PATCHES[i][0];
+      if (out.indexOf(from) !== -1) {
+        out = out.split(from).join(RUNTIME_STRING_PATCHES[i][1]);
+      }
+    }
+    return out;
+  }
+
   function targetPresets() {
     return [[
       'env',
@@ -62,9 +93,12 @@
       return { ok: false, code: rewriteScheme(code, opts.scheme), error: 'Babel не загружен' };
     }
     try {
-      var out = global.Babel.transform(code, {
+      var out = global.Babel.transform(patchRuntimeStrings(code), {
         presets: targetPresets(),
-        sourceType: opts.sourceType === 'module' ? 'module' : 'script',
+        // sourceType: 'unambiguous' — Babel сам определяет module vs script.
+        // Без него ES-модули (например editors.bundle.min.js с import.meta) падают
+        // и приложение получает исходный, непереписанный файл → «(syntax error)».
+        sourceType: 'unambiguous',
         // compact/comments — не косметика: на iOS 12 каждые лишние мегабайты
         // текста в мосте Babel приближают jetsam. Кеш на диске тоже меньше.
         compact: true,
