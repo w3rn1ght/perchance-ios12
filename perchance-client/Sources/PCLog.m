@@ -209,8 +209,14 @@ NSString * _Nullable PCLogPreviousCrashText(void) {
                @"Обычно это означает, что систему не хватило памяти (jetsam) "
                @"или процесс был убит извне.";
     }
-    if (out.length > 200000) {
-        return [out substringFromIndex:out.length - 200000];
+    // UITextView на iOS 12 тяжело переваривает сотни тысяч символов, а мы
+    // показываем лог сразу после вылета — лишняя нагрузка на память опасна.
+    // Для диагностики хватает хвоста: там и находятся последние события.
+    static const NSUInteger kMaxShown = 60000;
+    if (out.length > kMaxShown) {
+        NSString *tail = [out substringFromIndex:out.length - kMaxShown];
+        return [@"[…начало лога обрезано, показаны последние 60000 символов…]\n\n"
+                stringByAppendingString:tail];
     }
     return out;
 }
