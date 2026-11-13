@@ -6,7 +6,7 @@
 
 NSString * const PCScheme = @"wk";
 NSString * const PCSchemeHost = @"pc";
-NSString * const PCCacheDirectory = @"PCProxyCache7";
+NSString * const PCCacheDirectory = @"PCProxyCache8";
 
 static NSString * const kRootDomain = @"perchance.org";
 
@@ -108,6 +108,7 @@ static NSString * const kRootDomain = @"perchance.org";
             @"/__legacy/polyfills.js":    @[ @"polyfills.js", @"application/javascript" ],
             @"/__legacy/legacy.js":       @[ @"legacy.js", @"application/javascript" ],
             @"/__legacy/pc-bootstrap.js": @[ @"pc-bootstrap.js", @"application/javascript" ],
+            @"/__legacy/runtime-hooks.js": @[ @"runtime-hooks.js", @"application/javascript" ],
             @"/__legacy/babel.min.js":    @[ @"babel.min.js", @"application/javascript" ],
             @"/__legacy/core-js-bundle.js": @[ @"core-js-bundle.js", @"application/javascript" ],
             @"/__legacy/compat.css":      @[ @"compat.css", @"text/css" ]
