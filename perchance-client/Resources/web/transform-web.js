@@ -290,8 +290,8 @@
 
     // Инъекция кнопок в меню Perchance
     out = out.replace(/(<div[^>]+data-mi="new"[^>]*>[\s\S]*?<\/div>)/i, '$1' + 
-      '<div class="menu-item" onclick="window.open(\'/ai-chat\')" style="padding:0 6px"><span class="menu-item-icon">💬</span><span class="menu-item-label">AI Chat</span></div>' +
-      '<div class="menu-item" onclick="window.open(\'/ai-image-generator\')" style="padding:0 6px"><span class="menu-item-icon">🎨</span><span class="menu-item-label">Image Gen</span></div>');
+      '<div class="menu-item" onclick="window.open(\'/ai-character-chat\')" style="padding:0 6px"><span class="menu-item-icon">💬</span><span class="menu-item-label">AI Chat</span></div>' +
+      '<div class="menu-item" onclick="window.open(\'/ai-text-to-image-generator\')" style="padding:0 6px"><span class="menu-item-icon">🎨</span><span class="menu-item-label">AI Image Gen</span></div>');
 
     // Вставляем полифилы первыми
     if (/<head\b[^>]*>/i.test(out)) {
