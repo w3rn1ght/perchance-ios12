@@ -153,6 +153,7 @@ static NSString * const kRootDomain = @"perchance.org";
 
     NSURL *realURL = [NSURL URLWithString:origin];
     if (realURL == nil || ![self isPerchanceHost:realURL.host]) {
+        PCLogError(@"proxy: Отклонён хост для URL: %@ (origin: %@)", request.URL.absoluteString, origin);
         [self finish:completion mime:nil headers:nil body:nil
                error:[self error:@"Прокси обслуживает только perchance.org"]];
         return;
@@ -165,6 +166,7 @@ static NSString * const kRootDomain = @"perchance.org";
 }
 
 - (void)loadOriginURL:(NSString *)origin completion:(PCProxyCompletion)completion {
+    PCLog(@"proxy: loadOriginURL: %@", origin);
     NSURL *realURL = [NSURL URLWithString:origin];
     if (realURL == nil) {
         [self finish:completion mime:nil headers:nil body:nil error:[self error:@"Плохой URL"]];
@@ -298,6 +300,7 @@ static NSString * const kRootDomain = @"perchance.org";
 
     PCLog(@"proxy: JS %@ (%lu симв.)", url, (unsigned long)source.length);
     [self.transpiler transformJS:source filename:url completion:^(id result, NSError *error) {
+        PCLog(@"proxy: JS результат для %@: ok=%@", url, result);
         NSDictionary *dict = [result isKindOfClass:[NSDictionary class]] ? (NSDictionary *)result : nil;
         NSString *code = [dict[@"code"] isKindOfClass:[NSString class]] ? dict[@"code"] : nil;
         BOOL ok = [dict[@"ok"] boolValue] && code.length > 0;
@@ -306,8 +309,6 @@ static NSString * const kRootDomain = @"perchance.org";
             self.failed = self.failed + 1;
             PCLogError(@"proxy: JS не переписан %@ (%@)", url,
                        dict[@"error"] ?: error.localizedDescription ?: @"неизвестная ошибка");
-            // ВАЖНО: не кешируем исходник. Иначе современный синтаксис
-            // навсегда останется в кеше и страница будет мёртвой.
             [self finish:completion mime:@"application/javascript; charset=utf-8" headers:headers
                      body:[source dataUsingEncoding:NSUTF8StringEncoding] error:nil];
             return;

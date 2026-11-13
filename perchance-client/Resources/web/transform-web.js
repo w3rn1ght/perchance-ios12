@@ -281,6 +281,13 @@
       out = out.replace(/<head\b[^>]*>/i, function (m) { return m + CLIENT_MARKER; });
     }
 
+    // AI Chat и Image Gen в меню bridge.html (когда загружается сам прокси-интерфейс)
+    if (html.indexOf('perchance-client-bridge') !== -1) {
+       var menuInject = '<div class="menu-item" onclick="window.open(\'/ai-chat\')"><span class="menu-item-icon">💬</span><span class="menu-item-label">AI Chat</span></div>' +
+                        '<div class="menu-item" onclick="window.open(\'/ai-image-generator\')"><span class="menu-item-icon">🎨</span><span class="menu-item-label">Image Gen</span></div>';
+       out = out.replace('<!--pc-menu-extra-->', menuInject);
+    }
+
     // Вставляем полифилы первыми
     if (/<head\b[^>]*>/i.test(out)) {
       out = out.replace(/<head\b[^>]*>/i, function (m) { return m + HEAD_INJECT; });
