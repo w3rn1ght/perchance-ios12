@@ -5,8 +5,9 @@
 #import "PCJSTranspiler.h"
 #import "PCLog.h"
 #import "PCLogViewController.h"
+#import "PCSaveImage.h"
 
-@interface PCMainViewController () <WKNavigationDelegate, WKUIDelegate, UITextFieldDelegate>
+@interface PCMainViewController () <WKNavigationDelegate, WKUIDelegate, UITextFieldDelegate, WKScriptMessageHandler>
 @property (nonatomic, strong) PCProxy *proxy;
 @property (nonatomic, strong, readwrite) PCTranspilerProtocolHandler *handler;
 @property (nonatomic, strong) PCJSTranspiler *transpiler;
@@ -29,6 +30,9 @@
 
 @property (nonatomic, assign) BOOL pageLoaded;
 @property (nonatomic, assign) BOOL terminatedOnce;
+@property (nonatomic, strong) PCImageScriptProxy *imageProxy;
+
+- (void)presentSaveImageSheetForSource:(NSString *)source;
 @end
 
 @implementation PCMainViewController
@@ -290,6 +294,30 @@
                                                   injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                                forMainFrameOnly:NO];
     [controller addUserScript:script];
+
+    // Долгое нажатие на картинку -> «Сохранить в Фото».
+    self.imageProxy = [[PCImageScriptProxy alloc] initWithTarget:self];
+    [controller addScriptMessageHandler:self.imageProxy name:@"pcimage"];
+    NSString *hookPath = [[NSBundle mainBundle] pathForResource:@"image-longpress"
+                                                         ofType:@"js"
+                                                    inDirectory:@"web"];
+    if (hookPath.length > 0) {
+        NSError *hookError = nil;
+        NSString *hook = [NSString stringWithContentsOfFile:hookPath
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:&hookError];
+        if (hook.length > 0) {
+            [controller addUserScript:[[WKUserScript alloc]
+                initWithSource:hook
+                 injectionTime:WKUserScriptInjectionTimeAtDocumentEnd
+              forMainFrameOnly:NO]];
+        } else {
+            PCLogError(@"ui: не прочитан image-longpress.js: %@", hookError.localizedDescription);
+        }
+    } else {
+        PCLogError(@"ui: в бандле нет web/image-longpress.js");
+    }
+
     configuration.userContentController = controller;
 
     self.web = [[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration];
@@ -587,6 +615,59 @@
         string = [string substringFromIndex:prefix.length];
     }
     return string;
+}
+
+#pragma mark - WKScriptMessageHandler
+
+- (void)userContentController:(WKUserContentController *)userContentController
+      didReceiveScriptMessage:(WKScriptMessage *)message {
+    if (![message.name isEqualToString:@"pcimage"]) {
+        return;
+    }
+    if (![message.body isKindOfClass:[NSDictionary class]]) {
+        return;
+    }
+    NSDictionary *body = (NSDictionary *)message.body;
+    NSString *type = body[@"type"];
+    if (![type isKindOfClass:[NSString class]] || ![type isEqualToString:@"image"]) {
+        return;
+    }
+    NSString *source = body[@"src"];
+    if (![source isKindOfClass:[NSString class]] || source.length == 0) {
+        return;
+    }
+    PCLog(@"[save] долгое нажатие, источник: %@",
+          [source hasPrefix:@"data:"] ? @"data-URL" : source);
+    [self presentSaveImageSheetForSource:source];
+}
+
+- (void)presentSaveImageSheetForSource:(NSString *)source {
+    // Не наслаиваем лист поверх лога/алерта.
+    if (self.presentedViewController != nil) {
+        return;
+    }
+    UIAlertController *sheet =
+        [UIAlertController alertControllerWithTitle:@"Картинка"
+                                            message:nil
+                                     preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Сохранить в «Фото»"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *action) {
+        [PCSaveImage saveImageSource:source presenter:weakSelf];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Отмена"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+
+    UIPopoverPresentationController *popover = sheet.popoverPresentationController;
+    if (popover != nil) {
+        popover.sourceView = self.view;
+        popover.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                                        CGRectGetMidY(self.view.bounds), 1.0, 1.0);
+        popover.permittedArrowDirections = 0;
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 #pragma mark - WKUIDelegate
