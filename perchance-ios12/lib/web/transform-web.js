@@ -288,6 +288,11 @@
        out = out.replace('<!--pc-menu-extra-->', menuInject);
     }
 
+    // Инъекция кнопок в меню Perchance
+    out = out.replace(/(<div[^>]+data-mi="new"[^>]*>[\s\S]*?<\/div>)/i, '$1' + 
+      '<div class="menu-item" onclick="window.open(\'/ai-chat\')" style="padding:0 6px"><span class="menu-item-icon">💬</span><span class="menu-item-label">AI Chat</span></div>' +
+      '<div class="menu-item" onclick="window.open(\'/ai-image-generator\')" style="padding:0 6px"><span class="menu-item-icon">🎨</span><span class="menu-item-label">Image Gen</span></div>');
+
     // Вставляем полифилы первыми
     if (/<head\b[^>]*>/i.test(out)) {
       out = out.replace(/<head\b[^>]*>/i, function (m) { return m + HEAD_INJECT; });

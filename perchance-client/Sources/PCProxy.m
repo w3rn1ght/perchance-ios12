@@ -6,7 +6,7 @@
 
 NSString * const PCScheme = @"wk";
 NSString * const PCSchemeHost = @"pc";
-NSString * const PCCacheDirectory = @"PCProxyCache5";
+NSString * const PCCacheDirectory = @"PCProxyCache6";
 
 static NSString * const kRootDomain = @"perchance.org";
 
@@ -300,10 +300,10 @@ static NSString * const kRootDomain = @"perchance.org";
 
     PCLog(@"proxy: JS %@ (%lu симв.)", url, (unsigned long)source.length);
     [self.transpiler transformJS:source filename:url completion:^(id result, NSError *error) {
-        PCLog(@"proxy: JS результат для %@: ok=%@", url, result);
         NSDictionary *dict = [result isKindOfClass:[NSDictionary class]] ? (NSDictionary *)result : nil;
         NSString *code = [dict[@"code"] isKindOfClass:[NSString class]] ? dict[@"code"] : nil;
         BOOL ok = [dict[@"ok"] boolValue] && code.length > 0;
+        PCLog(@"proxy: JS результат для %@: ok=%d (len=%lu)", url, ok, (unsigned long)code.length);
 
         if (!ok) {
             self.failed = self.failed + 1;
