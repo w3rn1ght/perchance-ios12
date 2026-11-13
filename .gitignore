@@ -5,3 +5,7 @@ cache/
 *.err
 packages/
 .theos/
+
+work/
+tools/
+
