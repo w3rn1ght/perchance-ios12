@@ -152,8 +152,14 @@
         [UIAlertController alertControllerWithTitle:title
                                             message:message
                                      preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Копировать"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction * _Nonnull action) {
+        UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+        pasteboard.string = message ?: @"";
+    }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK"
-                                          style:UIAlertActionStyleDefault
+                                          style:UIAlertActionStyleCancel
                                         handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
