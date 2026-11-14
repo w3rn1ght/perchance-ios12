@@ -1,16 +1,15 @@
 /*
- * runtime-hooks.js — переписывает код, который Perchance компилирует в рантайме.
+ * runtime-hooks.js — лёгкий рантайм-трансформер для Safari 12.
  *
- * Зачем: файлы сайта проходят через Babel в прокси, но текст генераторов
- * (`modelText` из /api/generatorPageData) и inline-скрипты из outputTemplate
- * приходят данными. Движок собирает из них функцию и выполняет через
- * `new Function(...)` или вставляет <script> в DOM. Safari 12 падает на
- * первом `?.` в таком коде — отсюда страница «There is a problem with ...».
+ * Не использует Babel (3 Мб слишком много для iOS 12).
+ * Заменяет только критичный синтаксис, ломающий генераторы:
+ *   - Optional chaining:   a?.b      → (a==null?void 0:a.b)
+ *   - Optional bracket:    a?.[b]    → (a==null?void 0:a[b])
+ *   - Nullish coalescing:  a??b      → (a!=null?a:b)
+ *   - Logical assignment:  a||=b     → (a||(a=b))
+ *                         a&&=b     → (a&&(a=b))
  *
- * Babel загружается заранее через <script src="/__legacy/babel.min.js"> в HEAD_INJECT.
- * Здесь мы просто используем глобальный Babel.
- *
- * Файл отдаётся как есть (без транспиляции), поэтому только ES5.
+ * Работает синхронно, без XHR, без зависимостей.
  */
 (function (global) {
     'use strict';
@@ -20,107 +19,121 @@
     }
     global.__pcRuntimeHooksInstalled = true;
 
-    var MODERN = /\?\.|\?\?/;
-    var MAX_LENGTH = 900000;
-    var CACHE_LIMIT = 8;
-    var CACHE_MAX_CODE = 60000;
-
-    var babelBroken = false;
-    var transforming = false;
-    var cache = [];
     var log = [];
 
     function note(message) {
         log.push(message);
-        if (log.length > 40) {
-            log.shift();
-        }
-        try {
-            console.log('[pc-runtime] ' + message);
-        } catch (error) {
-            /* консоли может не быть */
-        }
+        if (log.length > 50) log.shift();
+        try { console.log('[pc-runtime] ' + message); } catch (e) {}
     }
 
-    function getBabel() {
-        if (babelBroken) {
-            return null;
-        }
-        var lib = global.Babel;
-        if (lib && typeof lib.transform === 'function') {
-            return lib;
-        }
-        note('Babel не найден в global');
-        babelBroken = true;
-        return null;
-    }
+    /* ---------- простые regex-замены для выражений (не в строках/комментариях) ---------- */
 
-    function rewrite(code) {
-        var lib = getBabel();
-        if (lib === null) {
-            return code;
-        }
-        var result = lib.transform(code, {
-            presets: [['env', {
-                targets: { safari: '12' },
-                modules: false,
-                bugfixes: true
-            }]],
-            sourceType: 'script',
-            compact: false,
-            comments: false,
-            parserOpts: {
-                allowReturnOutsideFunction: true,
-                allowAwaitOutsideFunction: true,
-                allowSuperOutsideMethod: true
+    function stripStringsAndComments(code) {
+        var out = '';
+        var i = 0, n = code.length;
+        var inS = false, inD = false, inT = false, inReg = false, inComm = false, inCommM = false;
+        var esc = false;
+        while (i < n) {
+            var ch = code[i];
+            var ch2 = code[i+1];
+            if (inComm) {
+                if (ch === '\n') { inComm = false; out += ch; }
+                i++; continue;
             }
-        });
-        return (result && result.code) ? result.code : code;
+            if (inCommM) {
+                if (ch === '*' && ch2 === '/') { inCommM = false; out += '  '; i += 2; continue; }
+                out += ' '; i++; continue;
+            }
+            if (inS) {
+                out += ch;
+                if (esc) { esc = false; }
+                else if (ch === '\\') { esc = true; }
+                else if (ch === '\'') { inS = false; }
+                i++; continue;
+            }
+            if (inD) {
+                out += ch;
+                if (esc) { esc = false; }
+                else if (ch === '\\') { esc = true; }
+                else if (ch === '"') { inD = false; }
+                i++; continue;
+            }
+            if (inT) {
+                out += ch;
+                if (esc) { esc = false; }
+                else if (ch === '\\') { esc = true; }
+                else if (ch === '`') { inT = false; }
+                i++; continue;
+            }
+            if (inReg) {
+                out += ch;
+                if (esc) { esc = false; }
+                else if (ch === '\\') { esc = true; }
+                else if (ch === '/') { inReg = false; }
+                i++; continue;
+            }
+            if (ch === '/' && ch2 === '/') { inComm = true; out += '  '; i += 2; continue; }
+            if (ch === '/' && ch2 === '*') { inCommM = true; out += '  '; i += 2; continue; }
+            if (ch === '\'') { inS = true; out += ch; i++; continue; }
+            if (ch === '"') { inD = true; out += ch; i++; continue; }
+            if (ch === '`') { inT = true; out += ch; i++; continue; }
+            // очень грубая эвристика для regex: / после (,=,:,[,?,!,&,|,;,{,}, 
+            if (ch === '/' && (i===0 || /[\(\[=:,\?\!&|\;\{\}]\s*$/.test(out))) { inReg = true; out += ch; i++; continue; }
+            out += ch; i++;
+        }
+        return { code: out, map: buildMap(code, out) };
     }
 
-    function transform(code) {
-        if (typeof code !== 'string' || code.length === 0) {
-            return code;
+    function buildMap(orig, stripped) {
+        var map = [];
+        var oi = 0, si = 0;
+        while (oi < orig.length && si < stripped.length) {
+            if (orig[oi] === stripped[si]) { map[si] = oi; oi++; si++; }
+            else { oi++; }
         }
-        if (!MODERN.test(code)) {
-            return code;
-        }
-        if (code.length > MAX_LENGTH) {
-            note('пропуск блока ' + code.length + ' символов');
-            return code;
-        }
-        if (transforming) {
-            return code;
-        }
-
-        var i;
-        for (i = 0; i < cache.length; i++) {
-            if (cache[i].input === code) {
-                return cache[i].output;
-            }
-        }
-
-        transforming = true;
-        var output = code;
-        try {
-            output = rewrite(code);
-            note('переписан блок ' + code.length + ' → ' + output.length);
-        } catch (error) {
-            note('ошибка переписывания: ' + error);
-        } finally {
-            transforming = false;
-        }
-
-        if (code.length <= CACHE_MAX_CODE) {
-            cache.push({ input: code, output: output });
-            if (cache.length > CACHE_LIMIT) {
-                cache.shift();
-            }
-        }
-        return output;
+        return map;
     }
 
-    /* ------------------------------------------------------------ Function --- */
+    function restoreStrings(original, transformed, map) {
+        if (!map || map.length !== transformed.length) return transformed;
+        var out = '';
+        var ti = 0, oi = 0;
+        while (ti < transformed.length) {
+            var origIdx = map[ti];
+            if (origIdx !== undefined && origIdx < original.length) {
+                out += original[origIdx];
+            } else {
+                out += transformed[ti];
+            }
+            ti++;
+        }
+        return out;
+    }
+
+    /* ---------- трансформация кода ---------- */
+
+    function transformCode(code) {
+        if (typeof code !== 'string' || code.length === 0) return code;
+        if (!/\?\.|\?\?|\|\|=|&&=/.test(code)) return code;
+
+        var parts = stripStringsAndComments(code);
+        var work = parts.code;
+
+        // a?.[b] → (a==null?void 0:a[b])   — делаем ПЕРВЫМ, иначе ?. съест ?.[
+        work = work.replace(/(\w|\]|\)|\}|\`)\?\.\s*\[/g, '$1==null?void 0:[');
+        work = work.replace(/(\w|\]|\)|\}|\`)\?\./g, '$1==null?void 0:');
+        // a??b → (a!=null?a:b)
+        work = work.replace(/(\w|\]|\)|\}|\`)\?\?/g, '$1!=null?$1:');
+        // a||=b → (a||(a=b))
+        work = work.replace(/(\w|\]|\)|\}|\`)\|\|=/g, '$1||($1=');
+        // a&&=b → (a&&(a=b))
+        work = work.replace(/(\w|\]|\)|\}|\`)&&=/g, '$1&&($1=');
+
+        return restoreStrings(code, work, parts.map);
+    }
+
+    /* ---------- перехват Function ---------- */
 
     var NativeFunction = global.Function;
     if (typeof NativeFunction === 'function') {
@@ -128,95 +141,60 @@
             var args = Array.prototype.slice.call(arguments);
             var last = args.length - 1;
             if (last >= 0 && typeof args[last] === 'string') {
-                args[last] = transform(args[last]);
+                args[last] = transformCode(args[last]);
             }
             return NativeFunction.apply(null, args);
         };
         PCFunction.prototype = NativeFunction.prototype;
-        try {
-            global.Function = PCFunction;
-            note('Function перехвачен');
-        } catch (error) {
-            note('Function: ' + error);
-        }
+        try { global.Function = PCFunction; note('Function перехвачен'); }
+        catch (e) { note('Function err: ' + e); }
     }
 
-    /* ---------------------------------------------------------------- eval --- */
+    /* ---------- перехват eval ---------- */
 
     var nativeEval = global.eval;
     if (typeof nativeEval === 'function') {
         try {
             global.eval = function (code) {
-                if (typeof code === 'string') {
-                    code = transform(code);
-                }
+                if (typeof code === 'string') code = transformCode(code);
                 return nativeEval.call(global, code);
             };
             note('eval перехвачен');
-        } catch (error) {
-            note('eval: ' + error);
-        }
+        } catch (e) { note('eval err: ' + e); }
     }
 
-    /* ----------------------------------------------- <script> в DOM ---------- */
+    /* ---------- перехват DOM <script> ---------- */
 
     if (typeof global.Node === 'function' && global.Node.prototype) {
         var proto = global.Node.prototype;
 
         function patchScriptNode(node) {
-            if (node === null || node === undefined || node.nodeType !== 1) {
-                return;
-            }
-            if (String(node.tagName).toUpperCase() !== 'SCRIPT') {
-                return;
-            }
-            if (node.src) {
-                return;
-            }
+            if (!node || node.nodeType !== 1) return;
+            if (String(node.tagName).toUpperCase() !== 'SCRIPT') return;
+            if (node.src) return;
             var text = node.textContent;
-            if (!text || !MODERN.test(text)) {
-                return;
-            }
+            if (!text || !/\?\.|\?\?|\|\|=|&&=/.test(text)) return;
             try {
-                node.textContent = transform(text);
-                note('script DOM переписан');
-            } catch (error) {
-                note('script: ' + error);
-            }
+                node.textContent = transformCode(text);
+                note('DOM script переписан');
+            } catch (e) { note('script err: ' + e); }
         }
 
-        function wrapInsertion(original) {
+        function wrapInsertion(orig) {
             return function (node) {
-                try {
-                    patchScriptNode(node);
-                } catch (error) {
-                    /* не мешаем вставке */
-                }
-                return original.apply(this, arguments);
+                try { patchScriptNode(node); } catch (e) {}
+                return orig.apply(this, arguments);
             };
         }
 
-        var nativeAppendChild = proto.appendChild;
-        if (typeof nativeAppendChild === 'function') {
-            proto.appendChild = wrapInsertion(nativeAppendChild);
-        }
-        var nativeInsertBefore = proto.insertBefore;
-        if (typeof nativeInsertBefore === 'function') {
-            proto.insertBefore = wrapInsertion(nativeInsertBefore);
-        }
-        var nativeReplaceChild = proto.replaceChild;
-        if (typeof nativeReplaceChild === 'function') {
-            proto.replaceChild = wrapInsertion(nativeReplaceChild);
-        }
+        if (typeof proto.appendChild === 'function') proto.appendChild = wrapInsertion(proto.appendChild);
+        if (typeof proto.insertBefore === 'function') proto.insertBefore = wrapInsertion(proto.insertBefore);
+        if (typeof proto.replaceChild === 'function') proto.replaceChild = wrapInsertion(proto.replaceChild);
         note('DOM script перехват установлен');
     }
 
     global.__pcRuntimeStats = function () {
-        return {
-            babelLoaded: getBabel() !== null,
-            babelBroken: babelBroken,
-            log: log.slice()
-        };
+        return { log: log.slice() };
     };
-    note('runtime-hooks инициализирован');
+    note('runtime-hooks инициализирован (lite, no Babel)');
 })(typeof window !== 'undefined' ? window : this);
