@@ -8,6 +8,7 @@
 @property (nonatomic, strong) UIButton *continueButton;
 @property (nonatomic, strong) UIButton *clipboardButton;
 @property (nonatomic, strong) UIButton *clearButton;
+@property (nonatomic, strong) UIButton *diagnosticsButton;
 @end
 
 @implementation PCLogViewController
@@ -52,6 +53,10 @@
     [self.view addSubview:self.clipboardButton];
     [self.view addSubview:self.clearButton];
     [self.view addSubview:self.continueButton];
+
+    self.diagnosticsButton = [self buttonWithTitle:@"Проверить runtime-hooks" action:@selector(diagnosticsTapped)];
+    self.diagnosticsButton.backgroundColor = [UIColor colorWithRed:0.18 green:0.55 blue:0.33 alpha:1];
+    [self.view addSubview:self.diagnosticsButton];
 
     PCLog(@"лог показан пользователю (%lu символов)", (unsigned long)self.logText.length);
 }
@@ -99,8 +104,11 @@
     self.clipboardButton.frame = CGRectMake(margin, smallY, half, 36);
     self.clearButton.frame = CGRectMake(margin + half + gap, smallY, half, 36);
 
+    CGFloat diagY = smallY - gap - 36;
+    self.diagnosticsButton.frame = CGRectMake(margin, diagY, width - margin * 2, 36);
+
     self.textView.frame = CGRectMake(margin, y, width - margin * 2,
-                                     smallY - 10 - y);
+                                     diagY - 10 - y);
 }
 
 - (void)copyLogTapped {
@@ -121,6 +129,33 @@
     PCLogClearAll();
     self.logText = @"(логи очищены)";
     self.textView.text = self.logText;
+}
+
+- (void)diagnosticsTapped {
+    if (!self.onDiagnostics) {
+        [self showAlert:@"Диагностика недоступна" message:@"WebView ещё не готов"];
+        return;
+    }
+    self.diagnosticsButton.enabled = NO;
+    [self.diagnosticsButton setTitle:@"Проверка..." forState:UIControlStateNormal];
+    self.onDiagnostics(^(NSString *result) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.diagnosticsButton.enabled = YES;
+            [self.diagnosticsButton setTitle:@"Проверить runtime-hooks" forState:UIControlStateNormal];
+            [self showAlert:@"runtime-hooks маркеры" message:result ?: @"(нет данных)"];
+        });
+    });
+}
+
+- (void)showAlert:(NSString *)title message:(NSString *)message {
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:title
+                                            message:message
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                          style:UIAlertActionStyleDefault
+                                        handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)continueTapped {

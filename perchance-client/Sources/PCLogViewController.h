@@ -11,6 +11,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, copy) NSString *logText;
 @property (nonatomic, copy, nullable) void (^onContinue)(void);
+/// Блок для диагностики: выполняет JS в WKWebView и вызывает completion с результатом строки
+@property (nonatomic, copy, nullable) void (^onDiagnostics)(void (^)(NSString *result));
 
 @end
 

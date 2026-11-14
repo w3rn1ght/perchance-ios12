@@ -174,6 +174,28 @@
     controller.onContinue = ^{
         [weakSelf dismissViewControllerAnimated:YES completion:nil];
     };
+    controller.onDiagnostics = ^(void (^completion)(NSString *result)) {
+        __weak typeof(self) weakSelf2 = self;
+        [weakSelf2.web evaluateJavaScript:
+            @"(function() {"
+            "  var keys = ['pc-runtime-load','pc-runtime-init','pc-runtime-done',"
+            "            'pc-runtime-fn-count','pc-runtime-eval-count','pc-runtime-dom-count',"
+            "            'pc-runtime-skip'];"
+            "  var out = {};"
+            "  keys.forEach(function(k) { out[k] = localStorage.getItem(k); });"
+            "  out.__pcRuntimeReady = String(!!window.__pcRuntimeHooksInstalled);"
+            "  return JSON.stringify(out);"
+            "})();"
+         completionHandler:^(id result, NSError *error) {
+             NSString *msg;
+             if (error) {
+                 msg = [NSString stringWithFormat:@"Ошибка JS: %@", error.localizedDescription];
+             } else {
+                 msg = result ?: @"(пустой результат)";
+             }
+             completion(msg);
+         }];
+    };
     controller.modalPresentationStyle = UIModalPresentationFullScreen;
     [self presentViewController:controller animated:YES completion:nil];
 }
