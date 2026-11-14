@@ -6,7 +6,7 @@
 
 NSString * const PCScheme = @"wk";
 NSString * const PCSchemeHost = @"pc";
-NSString * const PCCacheDirectory = @"PCProxyCache10";
+NSString * const PCCacheDirectory = @"PCProxyCache11";
 
 static NSString * const kRootDomain = @"perchance.org";
 

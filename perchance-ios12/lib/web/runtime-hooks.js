@@ -1,136 +1,44 @@
 /*
- * runtime-hooks.js — лёгкий рантайм-трансформер для Safari 12.
- *
- * Не использует Babel (3 Мб слишком много для iOS 12).
- * Заменяет только критичный синтаксис, ломающий генераторы:
- *   - Optional chaining:   a?.b      → (a==null?void 0:a.b)
- *   - Optional bracket:    a?.[b]    → (a==null?void 0:a[b])
- *   - Nullish coalescing:  a??b      → (a!=null?a:b)
- *   - Logical assignment:  a||=b     → (a||(a=b))
- *                         a&&=b     → (a&&(a=b))
- *
- * Работает синхронно, без XHR, без зависимостей.
+ * runtime-hooks.js — минимальный рантайм-трансформер для Safari 12.
+ * Без зависимостей, без сложных парсеров. Только regex на всём коде.
+ * Риск ложных срабатываний в строках/комментариях минимален для целевых операторов.
  */
 (function (global) {
     'use strict';
 
+    try { console.log('[pc-runtime] runtime-hooks.js загружен, старт инициализации'); } catch (e) {}
+
     if (!global || global.__pcRuntimeHooksInstalled) {
+        try { console.log('[pc-runtime] уже установлен, выход'); } catch (e) {}
         return;
     }
     global.__pcRuntimeHooksInstalled = true;
 
-    var log = [];
-
     function note(message) {
-        log.push(message);
-        if (log.length > 50) log.shift();
         try { console.log('[pc-runtime] ' + message); } catch (e) {}
     }
 
-    /* ---------- простые regex-замены для выражений (не в строках/комментариях) ---------- */
-
-    function stripStringsAndComments(code) {
-        var out = '';
-        var i = 0, n = code.length;
-        var inS = false, inD = false, inT = false, inReg = false, inComm = false, inCommM = false;
-        var esc = false;
-        while (i < n) {
-            var ch = code[i];
-            var ch2 = code[i+1];
-            if (inComm) {
-                if (ch === '\n') { inComm = false; out += ch; }
-                i++; continue;
-            }
-            if (inCommM) {
-                if (ch === '*' && ch2 === '/') { inCommM = false; out += '  '; i += 2; continue; }
-                out += ' '; i++; continue;
-            }
-            if (inS) {
-                out += ch;
-                if (esc) { esc = false; }
-                else if (ch === '\\') { esc = true; }
-                else if (ch === '\'') { inS = false; }
-                i++; continue;
-            }
-            if (inD) {
-                out += ch;
-                if (esc) { esc = false; }
-                else if (ch === '\\') { esc = true; }
-                else if (ch === '"') { inD = false; }
-                i++; continue;
-            }
-            if (inT) {
-                out += ch;
-                if (esc) { esc = false; }
-                else if (ch === '\\') { esc = true; }
-                else if (ch === '`') { inT = false; }
-                i++; continue;
-            }
-            if (inReg) {
-                out += ch;
-                if (esc) { esc = false; }
-                else if (ch === '\\') { esc = true; }
-                else if (ch === '/') { inReg = false; }
-                i++; continue;
-            }
-            if (ch === '/' && ch2 === '/') { inComm = true; out += '  '; i += 2; continue; }
-            if (ch === '/' && ch2 === '*') { inCommM = true; out += '  '; i += 2; continue; }
-            if (ch === '\'') { inS = true; out += ch; i++; continue; }
-            if (ch === '"') { inD = true; out += ch; i++; continue; }
-            if (ch === '`') { inT = true; out += ch; i++; continue; }
-            // очень грубая эвристика для regex: / после (,=,:,[,?,!,&,|,;,{,}, 
-            if (ch === '/' && (i===0 || /[\(\[=:,\?\!&|\;\{\}\]]\s*$/.test(out))) { inReg = true; out += ch; i++; continue; }
-            out += ch; i++;
-        }
-        return { code: out, map: buildMap(code, out) };
-    }
-
-    function buildMap(orig, stripped) {
-        var map = [];
-        var oi = 0, si = 0;
-        while (oi < orig.length && si < stripped.length) {
-            if (orig[oi] === stripped[si]) { map[si] = oi; oi++; si++; }
-            else { oi++; }
-        }
-        return map;
-    }
-
-    function restoreStrings(original, transformed, map) {
-        if (!map || map.length !== transformed.length) return transformed;
-        var out = '';
-        var ti = 0, oi = 0;
-        while (ti < transformed.length) {
-            var origIdx = map[ti];
-            if (origIdx !== undefined && origIdx < original.length) {
-                out += original[origIdx];
-            } else {
-                out += transformed[ti];
-            }
-            ti++;
-        }
-        return out;
-    }
-
-    /* ---------- трансформация кода ---------- */
+    /* ---------- простая трансформация всего текста ---------- */
 
     function transformCode(code) {
         if (typeof code !== 'string' || code.length === 0) return code;
+        // Быстрая проверка: есть ли что заменять
         if (!/\?\.|\?\?|\|\|=|&&=/.test(code)) return code;
 
-        var parts = stripStringsAndComments(code);
-        var work = parts.code;
+        var work = code;
 
-        // a?.[b] → (a==null?void 0:a[b])   — делаем ПЕРВЫМ, иначе ?. съест ?.[
-        work = work.replace(/(\w|\]|\)|\}|\`)\?\.\s*\[/g, '$1==null?void 0:[');
-        work = work.replace(/(\w|\]|\)|\}|\`)\?\./g, '$1==null?void 0:');
-        // a??b → (a!=null?a:b)
-        work = work.replace(/(\w|\]|\)|\}|\`)\?\?/g, '$1!=null?$1:');
-        // a||=b → (a||(a=b))
-        work = work.replace(/(\w|\]|\)|\}|\`)\|\|=/g, '$1||($1=');
-        // a&&=b → (a&&(a=b))
-        work = work.replace(/(\w|\]|\)|\}|\`)&&=/g, '$1&&($1=');
+        // a?.[b] -> (a==null?void 0:a[b])  — СНАЧАЛА, иначе ?. съест ?.[
+        work = work.replace(/(\w|\]|\)|\}|`)\?\.\s*\[/g, '$1==null?void 0:[');
+        // a?.b -> (a==null?void 0:a.b)
+        work = work.replace(/(\w|\]|\)|\}|`)\?\./g, '$1==null?void 0:');
+        // a??b -> (a!=null?a:b)
+        work = work.replace(/(\w|\]|\)|\}|`)\?\?/g, '$1!=null?$1:');
+        // a||=b -> (a||(a=b))
+        work = work.replace(/(\w|\]|\)|\}|`)\|\|=/g, '$1||($1=');
+        // a&&=b -> (a&&(a=b))
+        work = work.replace(/(\w|\]|\)|\}|`)&&=/g, '$1&&($1=');
 
-        return restoreStrings(code, work, parts.map);
+        return work;
     }
 
     /* ---------- перехват Function ---------- */
@@ -141,7 +49,11 @@
             var args = Array.prototype.slice.call(arguments);
             var last = args.length - 1;
             if (last >= 0 && typeof args[last] === 'string') {
-                args[last] = transformCode(args[last]);
+                var transformed = transformCode(args[last]);
+                if (transformed !== args[last]) {
+                    note('Function перехвачен и переписан (' + args[last].length + ' -> ' + transformed.length + ')');
+                }
+                args[last] = transformed;
             }
             return NativeFunction.apply(null, args);
         };
@@ -156,7 +68,11 @@
     if (typeof nativeEval === 'function') {
         try {
             global.eval = function (code) {
-                if (typeof code === 'string') code = transformCode(code);
+                if (typeof code === 'string') {
+                    var transformed = transformCode(code);
+                    if (transformed !== code) note('eval переписан');
+                    code = transformed;
+                }
                 return nativeEval.call(global, code);
             };
             note('eval перехвачен');
@@ -193,8 +109,5 @@
         note('DOM script перехват установлен');
     }
 
-    global.__pcRuntimeStats = function () {
-        return { log: log.slice() };
-    };
     note('runtime-hooks инициализирован (lite, no Babel)');
 })(typeof window !== 'undefined' ? window : this);
