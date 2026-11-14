@@ -95,5 +95,35 @@
         if (typeof proto.replaceChild === 'function') proto.replaceChild = wrapInsertion(proto.replaceChild);
     }
 
+    // Перехват document.write
+    var nativeWrite = global.document.write;
+    if (typeof nativeWrite === 'function') {
+        global.document.write = function (code) {
+            if (typeof code === 'string') {
+                var transformed = transformCode(code);
+                if (transformed !== code) {
+                    try { localStorage.setItem('pc-runtime-write-count', String((parseInt(localStorage.getItem('pc-runtime-write-count')||'0',10))+1)); } catch (e) {}
+                }
+                code = transformed;
+            }
+            return nativeWrite.call(global.document, code);
+        };
+    }
+
+    // Перехват innerHTML
+    var nativeInnerHtml = global.document.innerHTML;
+    if (typeof nativeInnerHtml === 'function') {
+        global.document.innerHTML = function (code) {
+            if (typeof code === 'string') {
+                var transformed = transformCode(code);
+                if (transformed !== code) {
+                    try { localStorage.setItem('pc-runtime-innerhtml-count', String((parseInt(localStorage.getItem('pc-runtime-innerhtml-count')||'0',10))+1)); } catch (e) {}
+                }
+                code = transformed;
+            }
+            return nativeInnerHtml.call(global.document, code);
+        };
+    }
+
     try { localStorage.setItem('pc-runtime-done', '1'); } catch (e) {}
 })(typeof window !== 'undefined' ? window : this);
