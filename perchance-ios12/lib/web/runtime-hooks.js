@@ -79,7 +79,7 @@
             if (ch === '"') { inD = true; out += ch; i++; continue; }
             if (ch === '`') { inT = true; out += ch; i++; continue; }
             // очень грубая эвристика для regex: / после (,=,:,[,?,!,&,|,;,{,}, 
-            if (ch === '/' && (i===0 || /[\(\[=:,\?\!&|\;\{\}]\s*$/.test(out))) { inReg = true; out += ch; i++; continue; }
+            if (ch === '/' && (i===0 || /[\(\[=:,\?\!&|\;\{\}\]]\s*$/.test(out))) { inReg = true; out += ch; i++; continue; }
             out += ch; i++;
         }
         return { code: out, map: buildMap(code, out) };
