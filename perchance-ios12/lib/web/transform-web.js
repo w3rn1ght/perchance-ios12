@@ -231,8 +231,8 @@
     '<script src="/__legacy/polyfills.js"></script>\n' +
     '<script src="/__legacy/core-js-bundle.js"></script>\n' +
     '<script src="/__legacy/legacy.js"></script>\n' +
-    '<script src="/__legacy/runtime-hooks.js"></script>\n' +
     '<script src="/__legacy/babel.min.js"></script>\n' +
+    '<script src="/__legacy/runtime-hooks.js"></script>\n' +
     '<link rel="stylesheet" href="/__legacy/compat.css">\n';
 
   // Маркер: загрузчик в приложении по нему понимает, что страницу уже
