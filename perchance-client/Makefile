@@ -32,8 +32,12 @@ include $(THEOS_MAKE_PATH)/application.mk
 # ---------------------------------------------------------------------------
 before-all::
 	@mkdir -p Resources/web
-	@cp -f $(P)/web/transform-web.js Resources/web/transform-web.js
-	@cp -f $(P)/polyfills.js          Resources/web/polyfills.js
-	@cp -f $(P)/legacy.js             Resources/web/legacy.js
-	@cp -f $(P)/babel.min.js          Resources/web/babel.min.js
+	@cp -f $(P)/web/transform-web.js       Resources/web/transform-web.js
+	@cp -f $(P)/web/runtime-hooks.js       Resources/web/runtime-hooks.js
+	@cp -f $(P)/polyfills.js               Resources/web/polyfills.js
+	@cp -f $(P)/legacy.js                  Resources/web/legacy.js
+	@cp -f $(P)/babel.min.js               Resources/web/babel.min.js
+	@cp -f $(P)/core-js-bundle.js          Resources/web/core-js-bundle.js
+	@cp -f $(P)/compat.css                 Resources/web/compat.css
+	@cp -f $(P)/web/pc-bootstrap.js        Resources/web/pc-bootstrap.js
 	@echo "[Perchance] web core copied: $$(ls Resources/web | tr '\n' ' ')"
