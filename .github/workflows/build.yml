@@ -17,6 +17,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Прошлый релиз 1.1.11 содержал пакет 1.1.10: версию забыли поднять в
+      # control/Info.plist. Теперь сборка падает, если версии расходятся или
+      # тег не совпадает с версией.
+      - name: Verify version consistency
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 '^Version:' perchance-client/control | awk '{print $2}' | tr -d '\r')
+          PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" perchance-client/Resources/Info.plist | tr -d '\r')
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" perchance-client/Resources/Info.plist | tr -d '\r')
+          echo "control=$VERSION plist=$PLIST_VERSION build=$BUILD ref=$GITHUB_REF"
+          if [ -z "$VERSION" ] || [ "$VERSION" != "$PLIST_VERSION" ]; then
+            echo "::error::Версия в control ($VERSION) не совпадает с Info.plist ($PLIST_VERSION)"
+            exit 1
+          fi
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              TAG="${GITHUB_REF#refs/tags/v}"
+              if [ "$TAG" != "$VERSION" ]; then
+                echo "::error::Тег v$TAG не совпадает с версией пакета $VERSION"
+                exit 1
+              fi
+              ;;
+          esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Install ldid and xz
         run: brew install ldid xz
 
@@ -43,6 +68,17 @@ jobs:
           cd perchance-client
           set -o pipefail
           make package FINALPACKAGE=1 2>&1 | tee /tmp/build.log
+
+      - name: Verify built package
+        run: |
+          set -euo pipefail
+          EXPECTED="perchance-client/packages/com.w3rn1ght.perchance_${VERSION}_iphoneos-arm.deb"
+          echo "Ожидаю пакет: $EXPECTED"
+          ls -l perchance-client/packages/ || true
+          if [ ! -f "$EXPECTED" ]; then
+            echo "::error::Собранный .deb не соответствует версии $VERSION (см. список файлов выше)"
+            exit 1
+          fi
 
       - name: Upload build log (on failure)
         if: failure()

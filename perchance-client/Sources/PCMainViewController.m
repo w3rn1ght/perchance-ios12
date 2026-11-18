@@ -6,6 +6,7 @@
 #import "PCLog.h"
 #import "PCLogViewController.h"
 #import "PCSaveImage.h"
+#import "PCJSBridge.h"
 
 @interface PCMainViewController () <WKNavigationDelegate, WKUIDelegate, UITextFieldDelegate, WKScriptMessageHandler>
 @property (nonatomic, strong) PCProxy *proxy;
@@ -132,15 +133,36 @@
 }
 
 - (void)loadOrigin:(NSString *)origin {
-    if (origin.length == 0 || ![origin hasPrefix:@"perchance.org"]) {
-        PCLogError(@"ui: отклонён адрес «%@»", origin);
-        if (![origin isEqualToString:@"perchance.org/welcome"]) {
+    NSString *trimmed = [origin stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length == 0) {
+        PCLogError(@"ui: пустой адрес");
+        return;
+    }
+
+    // Хост — до первого «/». Поддомены (text-generation.perchance.org,
+    // 04f1a4….perchance.org) обязаны открываться: именно на них живут
+    // iframe-ы AI и сами генераторы.
+    NSString *hostPart = trimmed;
+    NSRange slash = [trimmed rangeOfString:@"/"];
+    if (slash.location != NSNotFound) {
+        hostPart = [trimmed substringToIndex:slash.location];
+    }
+    NSString *host = hostPart.lowercaseString;
+    NSRange colon = [host rangeOfString:@":"];
+    if (colon.location != NSNotFound) {
+        host = [host substringToIndex:colon.location];
+    }
+    BOOL allowed = [host isEqualToString:@"perchance.org"] ||
+                   [host hasSuffix:@".perchance.org"];
+    if (!allowed) {
+        PCLogError(@"ui: отклонён адрес «%@» (хост «%@»)", origin, host);
+        if (![trimmed isEqualToString:@"perchance.org/welcome"]) {
             [self loadOrigin:@"perchance.org/welcome"];
         }
         return;
     }
 
-    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@", PCScheme, origin]];
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@", PCScheme, trimmed]];
     if (url == nil) {
         PCLogError(@"ui: не разобрал адрес «%@»", origin);
         return;
@@ -176,25 +198,50 @@
     };
     controller.onDiagnostics = ^(void (^completion)(NSString *result)) {
         __weak typeof(self) weakSelf2 = self;
-        [weakSelf2.web evaluateJavaScript:
+
+        // Нативная часть знает то, чего не видит localStorage главного кадра:
+        // счётчики прокси и статистику, присланную из каждого iframe.
+        PCProxy *proxy = weakSelf2.proxy;
+        NSString *native = [[PCJSBridge shared] diagnosticsReportWithExtra:@[
+            [NSString stringWithFormat:@"Прокси: JS переписано %ld, ошибок %ld",
+             (long)proxy.transformedCount, (long)proxy.failedCount],
+            [NSString stringWithFormat:@"Кэш: %@", PCCacheDirectory]
+        ]];
+
+        WKWebView *web = weakSelf2.web;
+        if (web == nil) {
+            completion(native);
+            return;
+        }
+
+        NSString *js =
             @"(function() {"
-            "  var keys = ['pc-runtime-load','pc-runtime-init','pc-runtime-done',"
-            "            'pc-runtime-fn-count','pc-runtime-eval-count','pc-runtime-dom-count',"
-            "            'pc-runtime-skip'];"
             "  var out = {};"
-            "  keys.forEach(function(k) { out[k] = localStorage.getItem(k); });"
-            "  out.__pcRuntimeReady = String(!!window.__pcRuntimeHooksInstalled);"
+            "  try {"
+            "    var keys = ['pc-runtime-load','pc-runtime-init','pc-runtime-done',"
+            "              'pc-runtime-fn-count','pc-runtime-fn-ok','pc-runtime-eval-count',"
+            "              'pc-runtime-dom-count','pc-runtime-write-count',"
+            "              'pc-runtime-innerhtml-count','pc-runtime-iframe-count',"
+            "              'pc-runtime-skip'];"
+            "    keys.forEach(function(k) { out[k] = localStorage.getItem(k); });"
+            "  } catch (e) { out.localStorageError = String(e); }"
+            "  try { out.ready = String(!!window.__pcRuntimeHooksInstalled); } catch (e) {}"
+            "  try {"
+            "    if (window.__pcRuntimeStats) { out.runtime = window.__pcRuntimeStats(); }"
+            "  } catch (e) { out.runtimeError = String(e); }"
             "  return JSON.stringify(out);"
-            "})();"
-         completionHandler:^(id result, NSError *error) {
-             NSString *msg;
-             if (error) {
-                 msg = [NSString stringWithFormat:@"Ошибка JS: %@", error.localizedDescription];
-             } else {
-                 msg = result ?: @"(пустой результат)";
-             }
-             completion(msg);
-         }];
+            "})();";
+
+        [web evaluateJavaScript:js completionHandler:^(id result, NSError *error) {
+            NSMutableString *out = [NSMutableString stringWithString:native];
+            [out appendString:@"\nГлавный кадр (localStorage):\n"];
+            if (error != nil) {
+                [out appendFormat:@"  ошибка JS: %@\n", error.localizedDescription];
+            } else {
+                [out appendFormat:@"  %@\n", result ?: @"(пусто)"];
+            }
+            completion(out);
+        }];
     };
     controller.modalPresentationStyle = UIModalPresentationFullScreen;
     [self presentViewController:controller animated:YES completion:nil];
@@ -316,6 +363,10 @@
                                                   injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                                forMainFrameOnly:NO];
     [controller addUserScript:script];
+
+    // Тела POST и статистика runtime-hooks из всех кадров.
+    [controller addScriptMessageHandler:[PCJSBridge shared] name:@"pcbody"];
+    [controller addScriptMessageHandler:[PCJSBridge shared] name:@"pcdiag"];
 
     // Долгое нажатие на картинку -> «Сохранить в Фото».
     self.imageProxy = [[PCImageScriptProxy alloc] initWithTarget:self];
@@ -520,7 +571,8 @@
     }
     NSURLComponents *components = [NSURLComponents componentsWithString:text];
     NSString *host = [components.host lowercaseString];
-    if (host.length == 0 || ![host containsString:@"perchance.org"]) {
+    if (host.length == 0 ||
+        (![host isEqualToString:@"perchance.org"] && ![host hasSuffix:@".perchance.org"])) {
         host = @"perchance.org";
     }
     NSString *path = components.path.length > 0 ? components.path : @"/welcome";
