@@ -1,6 +1,6 @@
 # Perchance для iOS 12 — два варианта
 
-**Скачать готовый пакет:** [com.w3rn1ght.perchance_1.1.17_iphoneos-arm.deb](https://github.com/w3rn1ght/perchance-ios12/releases/latest) (собирается в CI, ~3 МБ).
+**Скачать готовый пакет:** [com.w3rn1ght.perchance_1.1.18_iphoneos-arm.deb](https://github.com/w3rn1ght/perchance-ios12/releases/latest) (собирается в CI, ~3 МБ).
 
 Здесь два независимых решения одной проблемы: **perchance.org не грузит интерфейс
 на iOS 12, потому что Safari 12 не понимает `?.`, `??` и `class { #private }`**.
@@ -40,11 +40,11 @@
 
 Коротко:
 
-1. Скачать `com.w3rn1ght.perchance_1.1.17_iphoneos-arm.deb` из
+1. Скачать `com.w3rn1ght.perchance_1.1.18_iphoneos-arm.deb` из
    [Releases](https://github.com/w3rn1ght/perchance-ios12/releases/latest)
    (или из Actions → артефакт `perchance-deb`).
 2. Установить через Sileo/Zebra/Cydia («Install from file») или Filza.
-   По SSH: `dpkg -i com.w3rn1ght.perchance_1.1.17_iphoneos-arm.deb && uicache -p /Applications/Perchance.app`
+   По SSH: `dpkg -i com.w3rn1ght.perchance_1.1.18_iphoneos-arm.deb && uicache -p /Applications/Perchance.app`
 3. Открыть — приложение само прогреет Babel (~3 МБ, один раз) и покажет
    `perchance.org/welcome` с адресной строкой, кнопками «назад/обновить».
 

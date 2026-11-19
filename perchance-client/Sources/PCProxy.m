@@ -7,7 +7,7 @@
 
 NSString * const PCScheme = @"wk";
 NSString * const PCSchemeHost = @"pc";
-NSString * const PCCacheDirectory = @"PCProxyCache18";
+NSString * const PCCacheDirectory = @"PCProxyCache19";
 
 /// User-Agent настоящего Safari на этом же устройстве, а не «Chrome на macOS».
 ///
@@ -48,6 +48,37 @@ static NSString *PCHTTPSString(NSString *value) {
         return [@"https://" stringByAppendingString:[value substringFromIndex:5]];
     }
     return value;
+}
+
+/// Убирает параметры Cloudflare-challenge из URL.
+///
+/// После неудачного challenge Cloudflare переводит страницу на
+/// `?__cf_chl_rt_tk=…` и повторяет проверку. На схеме wk:// проверка не
+/// проходит никогда, а приложение затем перезагружает именно этот «билет» —
+/// получается вечный цикл 403. Запрашиваем исходный чистый URL.
+static NSString *PCStripChallengeParams(NSString *urlString) {
+    if (urlString.length == 0) { return urlString; }
+    if ([urlString rangeOfString:@"__cf_chl"].location == NSNotFound) {
+        return urlString;
+    }
+    NSURLComponents *components = [NSURLComponents componentsWithString:urlString];
+    if (components == nil) { return urlString; }
+    NSArray<NSString *> *names = @[
+        @"__cf_chl_rt_tk", @"__cf_chl_f_tk", @"__cf_chl_enter",
+        @"__cf_chl_jschl_tk__", @"__cf_chl_captcha_tk__", @"__cf_chl_tk"
+    ];
+    NSMutableArray<NSURLQueryItem *> *kept = [NSMutableArray array];
+    for (NSURLQueryItem *item in components.queryItems ?: @[]) {
+        if (![names containsObject:item.name]) {
+            [kept addObject:item];
+        }
+    }
+    if (kept.count == components.queryItems.count) {
+        return urlString;
+    }
+    components.queryItems = kept.count > 0 ? kept : nil;
+    NSString *clean = components.URL.absoluteString;
+    return clean.length > 0 ? clean : urlString;
 }
 
 #pragma mark - Задача
@@ -108,10 +139,14 @@ static NSString *PCHTTPSString(NSString *value) {
         cfg.timeoutIntervalForResource = 3600;
         cfg.HTTPCookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         cfg.HTTPShouldSetCookies = YES;
+        // Cloudflare ставит __cf_bm с Domain=.perchance.org. Политика
+        // «только с основного домена» может его отбросить, и тогда каждый
+        // запрос выглядит как первый — то есть как бот.
+        cfg.HTTPCookieAcceptPolicy = NSHTTPCookieAcceptPolicyAlways;
         cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
         cfg.HTTPAdditionalHeaders = @{
             @"User-Agent": kPCUserAgent,
-            @"Accept-Language": @"ru,en;q=0.9"
+            @"Accept-Language": @"ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
         };
         // Делегат нужен ради потоковой отдачи: ответ приходит кусками, и
         // каждый кусок сразу уходит в WKURLSchemeTask. NSURLSession держит
@@ -292,6 +327,12 @@ static NSString *PCHTTPSString(NSString *value) {
         return;
     }
 
+    NSString *cleanOrigin = PCStripChallengeParams(origin);
+    if (![cleanOrigin isEqualToString:origin]) {
+        PCLog(@"proxy: убираю CF-билет %@", origin);
+        origin = cleanOrigin;
+    }
+
     NSString *method = request.HTTPMethod.length > 0 ? request.HTTPMethod.uppercaseString : @"GET";
     BOOL bodyless = [method isEqualToString:@"GET"] || [method isEqualToString:@"HEAD"];
 
@@ -383,6 +424,7 @@ static NSString *PCHTTPSString(NSString *value) {
         up.HTTPMethod = job.method;
 
         NSString *referer = nil;
+        NSString *webkitUA = nil;
         for (NSString *key in original.allHTTPHeaderFields) {
             NSString *lower = key.lowercaseString;
             if ([lower isEqualToString:@"x-pc-body-id"] || PCHopByHopHeader(lower)) {
@@ -396,16 +438,51 @@ static NSString *PCHTTPSString(NSString *value) {
                 value = PCHTTPSString(value);
                 if ([lower isEqualToString:@"referer"]) { referer = value; }
             }
+            if ([lower isEqualToString:@"user-agent"]) { webkitUA = value; }
             [up setValue:value forHTTPHeaderField:key];
         }
 
-        if (referer.length == 0) {
-            [up setValue:[NSString stringWithFormat:@"https://%@/", realURL.host]
-              forHTTPHeaderField:@"Referer"];
+        // WebKit присылает свой User-Agent (без токена Safari), и он
+        // перекрывал бы kPCUserAgent из HTTPAdditionalHeaders. Cloudflare
+        // видит «Mobile/15E148» без «Version/… Safari/…» — типичный признак
+        // встроенного webview. Ставим UA явно и уже после копирования.
+        [up setValue:kPCUserAgent forHTTPHeaderField:@"User-Agent"];
+
+        // Верхнеуровневая навигация приходит без Referer. Подделывать его не
+        // надо: Safari при переходе по адресу Referer не отправляет, а CF
+        // считает лишний Referer признаком не-браузера.
+        NSString *lastComponent = realURL.lastPathComponent ?: @"";
+        BOOL looksDocument = (lastComponent.length == 0 ||
+                              [lastComponent rangeOfString:@"."].location == NSNotFound);
+        BOOL navigation = ([job.method isEqualToString:@"GET"] && looksDocument);
+
+        NSString *accept = [up valueForHTTPHeaderField:@"Accept"];
+        if (navigation) {
+            if (accept.length == 0 || [accept isEqualToString:@"*/*"]) {
+                [up setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                  forHTTPHeaderField:@"Accept"];
+            }
+            if ([up valueForHTTPHeaderField:@"Upgrade-Insecure-Requests"].length == 0) {
+                [up setValue:@"1" forHTTPHeaderField:@"Upgrade-Insecure-Requests"];
+            }
+        } else if (accept.length == 0) {
+            [up setValue:@"*/*" forHTTPHeaderField:@"Accept"];
         }
-        if ([up valueForHTTPHeaderField:@"Accept"].length == 0) {
-            [up setValue:@"text/html,application/xhtml+xml,application/json,*/*;q=0.8"
-              forHTTPHeaderField:@"Accept"];
+
+        PCLog(@"proxy: hdr %@ accept=%@ ref=%@ uir=%@",
+              job.url,
+              [up valueForHTTPHeaderField:@"Accept"] ?: @"-",
+              referer ?: @"-",
+              [up valueForHTTPHeaderField:@"Upgrade-Insecure-Requests"] ?: @"-");
+
+        if (navigation) {
+            NSArray<NSHTTPCookie *> *cookies =
+                [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:realURL];
+            PCLog(@"proxy: cookies %lu для %@",
+                  (unsigned long)cookies.count, realURL.host);
+            if (webkitUA.length > 0) {
+                PCLog(@"proxy: ua webkit=%@", webkitUA);
+            }
         }
         if (requestBody.length > 0) {
             up.HTTPBody = [requestBody dataUsingEncoding:NSUTF8StringEncoding];
