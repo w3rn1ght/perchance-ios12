@@ -1,6 +1,6 @@
 # Perchance для iOS 12 — два варианта
 
-**Скачать готовый пакет:** [com.w3rn1ght.perchance_1.1.15_iphoneos-arm.deb](https://github.com/w3rn1ght/perchance-ios12/releases/latest) (собирается в CI, ~520 КБ).
+**Скачать готовый пакет:** [com.w3rn1ght.perchance_1.1.16_iphoneos-arm.deb](https://github.com/w3rn1ght/perchance-ios12/releases/latest) (собирается в CI, ~3 МБ).
 
 Здесь два независимых решения одной проблемы: **perchance.org не грузит интерфейс
 на iOS 12, потому что Safari 12 не понимает `?.`, `??` и `class { #private }`**.

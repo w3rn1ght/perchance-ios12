@@ -15,7 +15,7 @@
 (function (global) {
   'use strict';
 
-  var VERSION = '1.1.15';
+  var VERSION = '1.1.16';
 
   function rewriteScheme(text, scheme) {
     if (!scheme || !text) { return text; }
@@ -80,6 +80,41 @@
   }
 
   /**
+   * Плагин: `x.postMessage(data, origin)` → `x.postMessage(data, __pcOrigin(origin))`.
+   *
+   * Приложение отдаёт страницы по схеме wk://, а сайт строит targetOrigin как
+   * `https://${host}.perchance.org`. Браузер сверяет targetOrigin с origin-ом
+   * получателя и при несовпадении молча выбрасывает сообщение — поэтому AI
+   * embed не получал запрос, а родительская страница не получала ответ.
+   * __pcOrigin определён в runtime-hooks.js (загружается первым).
+   */
+  function originPlugin(api) {
+    var t = api.types;
+    return {
+      name: 'pc-postmessage-origin',
+      visitor: {
+        CallExpression: function (path) {
+          var node = path.node;
+          var callee = node.callee;
+          if (!callee || callee.type !== 'MemberExpression') { return; }
+          var prop = callee.property;
+          var name = prop && (prop.name || prop.value);
+          if (name !== 'postMessage') { return; }
+          var args = node.arguments;
+          if (!args || args.length < 2 || args[1].type === 'SpreadElement') { return; }
+          args[1] = t.conditionalExpression(
+            t.binaryExpression('===',
+              t.unaryExpression('typeof', t.identifier('__pcOrigin')),
+              t.stringLiteral('function')),
+            t.callExpression(t.identifier('__pcOrigin'), [args[1]]),
+            args[1]
+          );
+        }
+      }
+    };
+  }
+
+  /**
    * @param {string} code
    * @param {{filename?:string, sourceType?:'script'|'module', force?:boolean}} opts
    * @returns {{ok:boolean, code:string, skipped?:boolean, error?:string}}
@@ -87,8 +122,8 @@
   function transformJS(code, opts) {
     opts = opts || {};
     if (!code) { return { ok: true, code: '', skipped: true }; }
-    if (!opts.force && !NEEDS_TRANSPILE.test(code)) {
-      // Нового синтаксиса нет — не тратим время на Babel.
+    if (!opts.force && !NEEDS_TRANSPILE.test(code) && code.indexOf('postMessage') === -1) {
+      // Нового синтаксиса нет и postMessage не встречается — Babel не нужен.
       return { ok: true, code: code, skipped: true };
     }
     if (!global.Babel || typeof global.Babel.transform !== 'function') {
@@ -107,6 +142,7 @@
         comments: false,
         babelrc: false,
         configFile: false,
+        plugins: [originPlugin],
         parserOpts: {
           allowReturnOutsideFunction: true,
           allowAwaitOutsideFunction: true,
@@ -259,7 +295,7 @@
         var typeM = /\btype\s*=\s*["']?([^"'\s>]+)/i.exec(attrs);
         var type = typeM ? typeM[1] : '';
         if (!JS_TYPES.test(type)) { return m; }
-        if (!body || !NEEDS_TRANSPILE.test(body)) { return m; }
+        if (!body || (!NEEDS_TRANSPILE.test(body) && body.indexOf('postMessage') === -1)) { return m; }
         var isModule = /^module$/i.test(type);
         var res = transformJS(body, { sourceType: isModule ? 'module' : 'script' });
         if (!res.ok) { return m; }

@@ -26,6 +26,24 @@
 
     var doc = global.document;
 
+    /* ------------------------------------------------ origin для postMessage --- */
+
+    // Perchance строит targetOrigin как `https://${host}.perchance.org`, а все
+    // кадры приложения живут на `wk://${host}.perchance.org`. postMessage с
+    // чужим targetOrigin браузер молча отбрасывает — из-за этого AI-embed не
+    // получал запрос, а страница не получала «verified» и токены ответа.
+    // Транспайлер оборачивает 2-й аргумент в __pcOrigin (см. originPlugin).
+    function pcOrigin(value) {
+        if (typeof value !== 'string' || value.length === 0) {
+            return value;
+        }
+        if (/^https?:\/\/[a-z0-9.-]*perchance\.org(:[0-9]+)?$/i.test(value)) {
+            return 'wk://' + value.replace(/^https?:\/\//i, '');
+        }
+        return value;
+    }
+    try { global.__pcOrigin = pcOrigin; } catch (e) {}
+
     function mark(key, value) {
         try { localStorage.setItem(key, String(value)); } catch (e) {}
     }
@@ -97,7 +115,41 @@
         }
     }
 
-    /* ---------------------------------------------------------------- Babel --- */
+    /* ------------------------------------------------------------- Babel --- */
+
+    // Плагин: `x.postMessage(data, origin)` → `x.postMessage(data, __pcOrigin(origin))`.
+    // Нужен и для кода, который движок компилирует в рантайме.
+    function originPlugin(api) {
+        var t = api.types;
+        return {
+            name: 'pc-postmessage-origin',
+            visitor: {
+                CallExpression: function (path) {
+                    var node = path.node;
+                    var callee = node.callee;
+                    if (!callee || callee.type !== 'MemberExpression') {
+                        return;
+                    }
+                    var prop = callee.property;
+                    var name = prop && (prop.name || prop.value);
+                    if (name !== 'postMessage') {
+                        return;
+                    }
+                    var args = node.arguments;
+                    if (!args || args.length < 2 || args[1].type === 'SpreadElement') {
+                        return;
+                    }
+                    args[1] = t.conditionalExpression(
+                        t.binaryExpression('===',
+                            t.unaryExpression('typeof', t.identifier('__pcOrigin')),
+                            t.stringLiteral('function')),
+                        t.callExpression(t.identifier('__pcOrigin'), [args[1]]),
+                        args[1]
+                    );
+                }
+            }
+        };
+    }
 
     var NativeFunction = global.Function;
     var nativeEval = global.eval;
@@ -116,7 +168,10 @@
         if (code.length > 500000) {
             return false;
         }
-        return MODERN.test(code);
+        // postMessage тоже требует правки (см. originPlugin) даже без нового
+        // синтаксиса: иначе targetOrigin останется https:// и сообщение
+        // потеряется между кадрами wk://.
+        return MODERN.test(code) || code.indexOf('postMessage') !== -1;
     }
 
     function loadBabel() {
@@ -196,6 +251,7 @@
                 comments: false,
                 babelrc: false,
                 configFile: false,
+                plugins: [originPlugin],
                 parserOpts: {
                     allowReturnOutsideFunction: true,
                     allowAwaitOutsideFunction: true,
@@ -919,7 +975,7 @@
         return {
             stats: stats,
             babel: babel !== null,
-            version: 3
+            version: 4
         };
     };
 
