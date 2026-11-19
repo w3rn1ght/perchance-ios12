@@ -15,7 +15,7 @@
 (function (global) {
   'use strict';
 
-  var VERSION = '1.1.16';
+  var VERSION = '1.1.17';
 
   function rewriteScheme(text, scheme) {
     if (!scheme || !text) { return text; }
@@ -288,6 +288,19 @@
 
     // CSP meta ломает наши вставки
     out = out.replace(/<meta[^>]+http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>/gi, '');
+
+    // Cloudflare JSD-детектор. Он создаёт скрытый about:blank-iframe и шлёт
+    // отпечаток из другого realm'а: origin там «wk://…», а заголовки говорят
+    // https://. Cloudflare считает это ботом и включает managed challenge,
+    // который на wk:// не проходится (нет secure context и crypto.subtle).
+    // Скрипт внедряется в конец <body>, поэтому вырезаем его по маркерам.
+    out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, function (m) {
+      if (m.indexOf('__CF$cv$params') !== -1 ||
+          m.indexOf('challenge-platform/scripts/jsd/') !== -1) {
+        return '';
+      }
+      return m;
+    });
 
     if (opts.transformInline !== false) {
       out = out.replace(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi, function (m, attrs, body) {

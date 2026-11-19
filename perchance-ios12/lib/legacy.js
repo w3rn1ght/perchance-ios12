@@ -171,6 +171,36 @@
     } catch (e) {}
   }());
 
+  /* --------------- 9. navigator под тот же UA, что уходит в сеть -------- */
+  // Заголовок User-Agent теперь настоящий Safari на этом устройстве (см.
+  // kPCUserAgent в PCProxy.m). Cloudflare сравнивает его с тем, что отдаёт
+  // JS: если UA в заголовке один, а navigator.userAgent другой — это
+  // признак бота. iOS 12 Safari и так не умеет crypto.subtle, поэтому
+  // окружение остаётся согласованным.
+  (function () {
+    var ua = 'Mozilla/5.0 (iPad; CPU OS 12_5_8 like Mac OS X) ' +
+             'AppleWebKit/605.1.15 (KHTML, like Gecko) ' +
+             'Version/12.1.2 Mobile/15E148 Safari/604.1';
+    var values = {
+      userAgent: ua,
+      appVersion: ua.replace(/^Mozilla\//, ''),
+      platform: 'iPad',
+      vendor: 'Apple Computer, Inc.',
+      appName: 'Netscape'
+    };
+    Object.keys(values).forEach(function (key) {
+      try {
+        var d = Object.getOwnPropertyDescriptor(W.Navigator.prototype, key);
+        if (!d || !d.configurable) { return; }
+        Object.defineProperty(W.Navigator.prototype, key, {
+          configurable: true,
+          enumerable: d.enumerable,
+          get: function () { return values[key]; }
+        });
+      } catch (e) {}
+    });
+  }());
+
   try {
     console.info('[legacy-portal] runtime loaded');
   } catch (e) {}

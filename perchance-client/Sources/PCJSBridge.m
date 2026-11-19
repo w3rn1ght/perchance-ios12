@@ -11,6 +11,7 @@ static const NSUInteger PCJSMaxFrames = 24;
 @property (nonatomic, strong) NSMutableArray<NSString *> *bodyOrder;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *frames;
 @property (nonatomic, strong) NSMutableArray<NSString *> *frameOrder;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *frameEnv;
 @end
 
 @implementation PCJSBridge
@@ -30,6 +31,7 @@ static const NSUInteger PCJSMaxFrames = 24;
         _bodyOrder = [NSMutableArray array];
         _frames = [NSMutableDictionary dictionary];
         _frameOrder = [NSMutableArray array];
+        _frameEnv = [NSMutableDictionary dictionary];
     }
     return self;
 }
@@ -86,16 +88,24 @@ static const NSUInteger PCJSMaxFrames = 24;
     if (![stats isKindOfClass:[NSDictionary class]]) {
         return;
     }
+    NSDictionary *env = body[@"env"];
+    if (![env isKindOfClass:[NSDictionary class]]) {
+        env = nil;
+    }
 
     @synchronized (self) {
         if (self.frames[href] == nil) {
             [self.frameOrder addObject:href];
         }
         self.frames[href] = stats;
+        if (env != nil) {
+            self.frameEnv[href] = env;
+        }
         while (self.frameOrder.count > PCJSMaxFrames) {
             NSString *old = self.frameOrder.firstObject;
             [self.frameOrder removeObjectAtIndex:0];
             [self.frames removeObjectForKey:old];
+            [self.frameEnv removeObjectForKey:old];
         }
     }
 
@@ -151,9 +161,11 @@ static const NSUInteger PCJSMaxFrames = 24;
 
     NSArray<NSString *> *order = nil;
     NSDictionary<NSString *, NSDictionary *> *frames = nil;
+    NSDictionary<NSString *, NSDictionary *> *envs = nil;
     @synchronized (self) {
         order = [self.frameOrder copy];
         frames = [self.frames copy];
+        envs = [self.frameEnv copy];
     }
 
     [out appendFormat:@"\nКадров со статистикой: %lu\n", (unsigned long)order.count];
@@ -180,6 +192,16 @@ static const NSUInteger PCJSMaxFrames = 24;
         id lastError = stats[@"lastError"];
         if ([lastError isKindOfClass:[NSString class]] && [lastError length] > 0) {
             [out appendFormat:@"   lastError=%@\n", lastError];
+        }
+        NSDictionary *env = envs[href];
+        if (env != nil) {
+            [out appendFormat:@"   env origin=%@ secure=%@ subtle=%@ cookie=%@ perch=%@\n",
+                              [self valueFor:env key:@"origin"],
+                              [self valueFor:env key:@"secure"],
+                              [self valueFor:env key:@"subtle"],
+                              [self valueFor:env key:@"cookie"],
+                              [self valueFor:env key:@"perch"]];
+            [out appendFormat:@"   ua=%@\n", [self valueFor:env key:@"ua"]];
         }
     }
     if (order.count == 0) {

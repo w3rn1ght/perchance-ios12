@@ -7,7 +7,22 @@
 
 NSString * const PCScheme = @"wk";
 NSString * const PCSchemeHost = @"pc";
-NSString * const PCCacheDirectory = @"PCProxyCache17";
+NSString * const PCCacheDirectory = @"PCProxyCache18";
+
+/// User-Agent настоящего Safari на этом же устройстве, а не «Chrome на macOS».
+///
+/// Раньше здесь стоял Chrome/macOS. Cloudflare видит набор несовместимостей —
+/// TLS-отпечаток CFNetwork вместо Chrome, отсутствие Sec-CH-UA при UA Chrome,
+/// экран iPad — и выдаёт managed challenge. Пройти его на схеме wk:// нельзя:
+/// страница не в secure context, crypto.subtle недоступен, а JS-детектор
+/// сообщает свой origin «wk://…», который не совпадает с заголовком Referer.
+/// В итоге весь сайт превращался в «Just a moment…» и белый экран.
+///
+/// UA должен совпадать с реальным окружением: iOS 12.5.8, Safari 12.1.2.
+/// Тогда TLS, WebKit и navigator.userAgent говорят одно и то же.
+static NSString * const kPCUserAgent =
+    @"Mozilla/5.0 (iPad; CPU OS 12_5_8 like Mac OS X) AppleWebKit/605.1.15 "
+    @"(KHTML, like Gecko) Version/12.1.2 Mobile/15E148 Safari/604.1";
 
 static NSString * const kRootDomain = @"perchance.org";
 
@@ -95,9 +110,7 @@ static NSString *PCHTTPSString(NSString *value) {
         cfg.HTTPShouldSetCookies = YES;
         cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
         cfg.HTTPAdditionalHeaders = @{
-            @"User-Agent": @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                           @"AppleWebKit/537.36 (KHTML, like Gecko) "
-                           @"Chrome/131.0.0.0 Safari/537.36",
+            @"User-Agent": kPCUserAgent,
             @"Accept-Language": @"ru,en;q=0.9"
         };
         // Делегат нужен ради потоковой отдачи: ответ приходит кусками, и
@@ -295,6 +308,22 @@ static NSString *PCHTTPSString(NSString *value) {
         }
     }
 
+    // Cloudflare-детектор JS (JSD) на схеме wk:// вредит: он отправляет
+    // отпечаток, где origin — «wk://…», тогда как заголовки говорят https://.
+    // Несовпадение Cloudflare считает признаком бота и включает managed
+    // challenge, который на wk:// не проходится (нет secure context и
+    // crypto.subtle). Отвечаем пустым скриптом — детектор просто не работает.
+    if ([originPath hasPrefix:@"/cdn-cgi/challenge-platform/scripts/jsd/"]) {
+        PCLog(@"proxy: jsd отключён %@", originPath);
+        [self deliverImmediate:handler
+                        status:200
+                          mime:@"application/javascript; charset=utf-8"
+                       headers:@{ @"Cache-Control": @"no-store" }
+                          body:[@"/* jsd disabled */" dataUsingEncoding:NSUTF8StringEncoding]
+                         error:nil];
+        return;
+    }
+
     NSURL *realURL = [NSURL URLWithString:origin];
     if (realURL == nil || ![self isPerchanceHost:realURL.host]) {
         PCLogError(@"proxy: отклонён хост для URL: %@ (origin: %@)", request.URL.absoluteString, origin);
@@ -452,8 +481,15 @@ didReceiveResponse:(NSURLResponse *)response
 
     PCLog(@"proxy: ← %ld %@ (%@)", (long)status, job.url, mime);
 
-    // Кэш только для GET и только для того, что переписываем.
-    if (transformable && kind.length > 0 && [job.method isEqualToString:@"GET"]) {
+    if (status == 403 && isHTML) {
+        PCLogError(@"proxy: Cloudflare challenge вместо страницы: %@", job.url);
+    }
+
+    // Кэш только для GET, только для 200 и только для того, что переписываем.
+    // Раньше кэшировался любой ответ, включая 403-challenge: после первого
+    // «Just a moment…» приложение навсегда показывало белый экран.
+    if (status == 200 && transformable && kind.length > 0 &&
+        [job.method isEqualToString:@"GET"]) {
         NSString *cachePath = [self cachePathForURL:job.url kind:kind];
         NSString *cached = [NSString stringWithContentsOfFile:cachePath
                                                      encoding:NSUTF8StringEncoding

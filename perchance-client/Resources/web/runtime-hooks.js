@@ -81,6 +81,23 @@
 
     var postTimer = null;
 
+    // Окружение кадра: нужно, чтобы по логу было видно, в каком контексте
+    // работает страница (origin, secure context, cookie, UA).
+    function envInfo() {
+        var env = { origin: '', href: '', secure: false, subtle: false,
+                    cookie: -1, ua: '', perch: false };
+        try { env.href = String(global.location.href || ''); } catch (e) {}
+        try { env.origin = String(global.location.origin || ''); } catch (e) {}
+        try { env.secure = !!(global.isSecureContext); } catch (e) {}
+        try { env.subtle = !!(global.crypto && global.crypto.subtle); } catch (e) {}
+        try { env.cookie = String(global.document.cookie || '').length; } catch (e) { env.cookie = -2; }
+        try { env.ua = String(global.navigator.userAgent || ''); } catch (e) {}
+        try {
+            env.perch = !!(global.PERCH && global.PERCH.isServedOnPerchanceSubdomain);
+        } catch (e) {}
+        return env;
+    }
+
     function flushStats() {
         postTimer = null;
         stats.done = 1;
@@ -98,7 +115,8 @@
                 global.webkit.messageHandlers.pcdiag.postMessage({
                     type: 'stats',
                     href: String((global.location && global.location.href) || ''),
-                    stats: stats
+                    stats: stats,
+                    env: envInfo()
                 });
             }
         } catch (e) {}
@@ -975,7 +993,8 @@
         return {
             stats: stats,
             babel: babel !== null,
-            version: 4
+            version: 5,
+            env: envInfo()
         };
     };
 
