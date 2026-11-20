@@ -1,13 +1,14 @@
 #import "PCProxy.h"
 #import "PCJSBridge.h"
 #import "PCJSTranspiler.h"
+#import "PCWebFetcher.h"
 #import "PCLog.h"
 #import <Foundation/Foundation.h>
 #import <CommonCrypto/CommonDigest.h>
 
 NSString * const PCScheme = @"wk";
 NSString * const PCSchemeHost = @"pc";
-NSString * const PCCacheDirectory = @"PCProxyCache19";
+NSString * const PCCacheDirectory = @"PCProxyCache20";
 
 /// User-Agent настоящего Safari на этом же устройстве, а не «Chrome на macOS».
 ///
@@ -23,6 +24,10 @@ NSString * const PCCacheDirectory = @"PCProxyCache19";
 static NSString * const kPCUserAgent =
     @"Mozilla/5.0 (iPad; CPU OS 12_5_8 like Mac OS X) AppleWebKit/605.1.15 "
     @"(KHTML, like Gecko) Version/12.1.2 Mobile/15E148 Safari/604.1";
+
+NSString *PCUserAgentString(void) {
+    return kPCUserAgent;
+}
 
 static NSString * const kRootDomain = @"perchance.org";
 
@@ -560,6 +565,13 @@ didReceiveResponse:(NSURLResponse *)response
 
     if (status == 403 && isHTML) {
         PCLogError(@"proxy: Cloudflare challenge вместо страницы: %@", job.url);
+        // NSURLSession Cloudflare не пропускает: отпечаток не браузерный, а
+        // пройти challenge на wk:// нельзя. Отменяем ответ и забираем
+        // страницу скрытым WKWebView по https:// — там проверка решается.
+        [self removeJob:job];
+        completionHandler(NSURLSessionResponseCancel);
+        [self solveChallengeForJob:job];
+        return;
     }
 
     // Кэш только для GET, только для 200 и только для того, что переписываем.
@@ -635,6 +647,65 @@ didCompleteWithError:(NSError *)error {
     dispatch_async(dispatch_get_main_queue(), ^{
         [self completeJob:job error:error];
     });
+}
+
+#pragma mark - Обход Cloudflare
+
+/// Забирает HTML скрытым WKWebView по https:// и отдаёт его в обычный
+/// конвейер трансформации. Нужен только когда NSURLSession получил 403.
+- (void)solveChallengeForJob:(PCProxyJob *)job {
+    NSURL *url = [NSURL URLWithString:job.url];
+    if (url == nil) {
+        [self deliverChallengeFallbackForJob:job];
+        return;
+    }
+    __weak typeof(self) weakSelf = self;
+    [[PCWebFetcher shared] fetchHTMLForURL:url completion:^(NSString *html, NSError *error) {
+        PCProxy *s = weakSelf;
+        if (s == nil) { return; }
+        if (html.length == 0) {
+            PCLogError(@"proxy: fetcher не смог %@ — %@", job.url,
+                       error.localizedDescription ?: @"неизвестная ошибка");
+            [s deliverChallengeFallbackForJob:job];
+            return;
+        }
+        PCLog(@"proxy: fetcher HTML %@ (%lu симв.)", job.url, (unsigned long)html.length);
+        job.status = 200;
+        job.mime = @"text/html";
+        job.kind = @"html";
+        job.transformable = YES;
+        job.cachePath = [s cachePathForURL:job.url kind:@"html"];
+        @synchronized (job) {
+            [job.buffer setData:[html dataUsingEncoding:NSUTF8StringEncoding]];
+        }
+        [s completeJob:job error:nil];
+    }];
+}
+
+- (void)deliverChallengeFallbackForJob:(PCProxyJob *)job {
+    NSString *html =
+        @"<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        @"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        @"<style>body{font:16px/1.45 -apple-system,sans-serif;margin:0;padding:28px;"
+        @"background:#111;color:#eee}button{margin-top:16px;padding:10px 16px;"
+        @"border:1px solid #7cc4ff;border-radius:8px;background:transparent;"
+        @"color:#7cc4ff;font-size:16px}</style></head><body>"
+        @"<h2>Cloudflare не пропускает</h2>"
+        @"<p>Сайт ответил проверкой Cloudflare, и пройти её не удалось. "
+        @"Попробуйте перезагрузить страницу, сменить сеть (Wi-Fi ↔ мобильный "
+        @"интернет) или подождать несколько минут.</p>"
+        @"<button onclick=\"location.reload()\">Повторить</button>"
+        @"</body></html>";
+    PCLogError(@"proxy: показываю заглушку вместо %@", job.url);
+    job.status = 200;
+    job.mime = @"text/html; charset=utf-8";
+    job.kind = @"html";
+    job.transformable = YES;
+    job.cachePath = nil;
+    @synchronized (job) {
+        [job.buffer setData:[html dataUsingEncoding:NSUTF8StringEncoding]];
+    }
+    [self completeJob:job error:nil];
 }
 
 #pragma mark - Завершение

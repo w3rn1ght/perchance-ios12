@@ -15,7 +15,7 @@
 (function (global) {
   'use strict';
 
-  var VERSION = '1.1.18';
+  var VERSION = '1.1.19';
 
   function rewriteScheme(text, scheme) {
     if (!scheme || !text) { return text; }

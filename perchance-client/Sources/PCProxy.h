@@ -7,6 +7,10 @@ extern NSString * const PCScheme;
 extern NSString * const PCSchemeHost;
 extern NSString * const PCCacheDirectory;
 
+/// UA настоящего Safari этого устройства. Один и тот же в заголовках,
+/// в navigator (legacy.js) и в скрытом WKWebView.
+FOUNDATION_EXPORT NSString *PCUserAgentString(void);
+
 /// Этапы одной загрузки. Порядок всегда такой:
 ///   Head (один раз) → Data (0+ раз) → End (один раз).
 ///

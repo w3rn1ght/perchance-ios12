@@ -70,7 +70,7 @@ perchance.org  ──►  PCProxy (Objective-C)
 
 ## Установка (готовый .deb)
 
-1. Скачайте `com.w3rn1ght.perchance_1.1.18_iphoneos-arm.deb` из **Actions** / **Releases**.
+1. Скачайте `com.w3rn1ght.perchance_1.1.19_iphoneos-arm.deb` из **Actions** / **Releases**.
 2. Установите через Sileo/Zebra/Cydia («Install from file») или Filza (тап по .deb → Install).
 3. Если иконки нет — `uicache` или respring.
 
